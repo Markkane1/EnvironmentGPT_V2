@@ -8,14 +8,9 @@ import { twMerge } from 'tailwind-merge'
 import { 
   Document, 
   DocumentFilter, 
-  DocumentChunk,
   SourceReference 
 } from '@/types'
-import { 
-  DOCUMENT_CATEGORIES, 
-  AQI_CATEGORIES,
-  AQI_PARAMETERS 
-} from '@/lib/constants'
+import { AQI_CATEGORIES, AQI_PARAMETERS } from '@/lib/constants'
 
 // ==================== CSS Utilities ====================
 
@@ -268,6 +263,38 @@ export function isValidUrl(str: string): boolean {
 
 export function getFileExtension(filename: string): string {
   return filename.slice(((filename.lastIndexOf('.') - 1) >>> 0) + 2)
+}
+
+export function sanitizeFileName(filename: string, maxLength: number = 255): string {
+  const basename = filename.split(/[\\/]/).pop() || 'document'
+  const cleaned = basename
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/[<>:"/\\|?*]+/g, '_')
+    .replace(/^\.+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const safeName = cleaned || 'document'
+  return safeName.length > maxLength ? safeName.slice(0, maxLength) : safeName
+}
+
+export function getSafeDocumentTitleFromFileName(filename: string): string {
+  const safeFileName = sanitizeFileName(filename)
+  const title = safeFileName.replace(/\.[^/.]+$/, '').trim()
+  return title || 'Uploaded Document'
+}
+
+export function sanitizeFilename(filename: string, fallback: string = 'file'): string {
+  const trimmed = filename.trim()
+  const baseName = trimmed.split(/[/\\]+/).pop() ?? ''
+  const cleaned = baseName
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/, '')
+    .slice(0, 255)
+
+  return cleaned || fallback
 }
 
 export function formatFileSize(bytes: number): string {

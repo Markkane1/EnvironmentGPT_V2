@@ -5,7 +5,7 @@
 
 import { db } from '@/lib/db'
 import { embeddingService } from './embedding-service'
-import { DocumentChunk, SourceReference } from '@/types'
+import { SourceReference } from '@/types'
 
 // ==================== Types ====================
 
@@ -193,7 +193,7 @@ export class VectorStoreService {
     const { topK = 5, documentIds, category, threshold = this.SIMILARITY_THRESHOLD } = options
 
     // Generate query embedding
-    const { embedding: queryEmbedding } = await embeddingService.embedText(query)
+    const queryEmbedding = await embeddingService.generateEmbedding(query)
 
     // Get candidates from index
     const candidates: VectorDocument[] = []

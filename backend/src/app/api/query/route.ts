@@ -4,17 +4,32 @@
 // =====================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import { authenticateToken } from '@/middleware/auth'
+import { getRouteAuthContext } from '@/lib/route-middleware'
 import { queryProcessorService } from '@/lib/services/query-processor'
+import { createValidationErrorResponse } from '@/lib/validators'
 import { z } from 'zod'
 
 const analyzeQuerySchema = z.object({
-  query: z.string().min(3).max(1000)
-})
+  query: z.string().trim().min(3).max(1000).refine(value => !/[<>]/.test(value), 'HTML-like markup is not allowed'),
+}).strict()
 
 export async function POST(request: NextRequest) {
+  const { response: authError } = await getRouteAuthContext(request, authenticateToken)
+  if (authError) return authError
+
   try {
     const body = await request.json()
-    const { query } = analyzeQuerySchema.parse(body)
+    const parsed = analyzeQuerySchema.safeParse(body)
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        createValidationErrorResponse(parsed.error),
+        { status: 400 }
+      )
+    }
+
+    const { query } = parsed.data
     
     // Process the query
     const processed = queryProcessorService.processQuery(query)
@@ -44,14 +59,7 @@ export async function POST(request: NextRequest) {
     
   } catch (error) {
     console.error('Query analysis error:', error)
-    
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid query', details: error.errors },
-        { status: 400 }
-      )
-    }
-    
+
     return NextResponse.json(
       { success: false, error: 'Failed to analyze query' },
       { status: 500 }
@@ -61,6 +69,9 @@ export async function POST(request: NextRequest) {
 
 // Get suggested questions based on category
 export async function GET(request: NextRequest) {
+  const { response: authError } = await getRouteAuthContext(request, authenticateToken)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const category = searchParams.get('category')

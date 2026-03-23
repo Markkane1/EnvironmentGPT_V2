@@ -130,7 +130,7 @@ describe('ConversationMemoryService', () => {
       await expect(memoryService.generateSummary('session-1')).resolves.toBeNull()
     })
 
-    it('persists a generated summary once enough messages exist', async () => {
+    it('returns a generated summary once enough messages exist', async () => {
       const enoughMessages = Array.from({ length: 10 }, (_, index) => ({
         id: `msg-${index}`,
         sessionId: 'session-1',
@@ -142,17 +142,10 @@ describe('ConversationMemoryService', () => {
       }))
 
       ;(db.chatMessage.findMany as jest.Mock).mockResolvedValue(enoughMessages)
-      ;(db.chatSession.update as jest.Mock).mockResolvedValue({ id: 'session-1' })
-
       const summary = await memoryService.generateSummary('session-1')
 
       expect(summary).toContain('Conversation about')
-      expect(db.chatSession.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'session-1' },
-          data: expect.objectContaining({ summary }),
-        })
-      )
+      expect(db.chatSession.update).not.toHaveBeenCalled()
     })
   })
 
@@ -213,7 +206,6 @@ describe('ConversationMemoryService', () => {
           where: { id: 'session-1' },
           data: expect.objectContaining({
             title: 'New Conversation',
-            summary: null,
           }),
         })
       )

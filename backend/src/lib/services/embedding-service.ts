@@ -5,7 +5,7 @@
 
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
-import { DocumentChunk, EmbeddingVector, RetrievalResult } from '@/types'
+import type { ChunkMetadata, RetrievalResult } from '@/types'
 import { RAG_CONFIG } from '@/lib/constants'
 
 // ==================== Embedding Service Class ====================
@@ -158,13 +158,20 @@ export class EmbeddingService {
           if (!chunkEmbedding) return null
           
           const score = this.cosineSimilarity(queryEmbedding, chunkEmbedding)
+          const metadata = this.parseJson<Partial<ChunkMetadata>>(chunk.metadata)
           return {
             chunk: {
               id: chunk.id,
               documentId: chunk.documentId,
               content: chunk.content,
               chunkIndex: chunk.chunkIndex,
-              metadata: this.parseJson<Record<string, unknown>>(chunk.metadata) || {},
+              metadata: {
+                startPosition: metadata?.startPosition ?? 0,
+                endPosition: metadata?.endPosition ?? chunk.content.length,
+                wordCount: metadata?.wordCount ?? chunk.content.split(/\s+/).length,
+                pageNumber: metadata?.pageNumber,
+                section: metadata?.section,
+              },
               createdAt: chunk.createdAt
             },
             score
@@ -236,8 +243,6 @@ export class EmbeddingService {
     
     // Use text characteristics to generate pseudo-embedding
     const words = text.toLowerCase().split(/\s+/)
-    const uniqueWords = new Set(words)
-    
     // Generate embedding based on word frequencies and positions
     for (let i = 0; i < words.length; i++) {
       const word = words[i]

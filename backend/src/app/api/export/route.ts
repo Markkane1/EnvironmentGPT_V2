@@ -5,10 +5,16 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { authenticateToken } from '@/middleware/auth'
 import { formatDate } from '@/lib/utils'
+import { getRouteAuthContext } from '@/lib/route-middleware'
+import type { AuthenticatedUser } from '@/middleware/auth'
 
 // Export chat history
 export async function GET(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
+  if (authError || !user) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'json'
@@ -17,11 +23,11 @@ export async function GET(request: NextRequest) {
     
     switch (type) {
       case 'chat':
-        return exportChat(sessionId, format)
+        return exportChat(sessionId, format, user)
       case 'documents':
-        return exportDocuments(format)
+        return exportDocuments(format, user)
       case 'stats':
-        return exportStats(format)
+        return exportStats(format, user)
       default:
         return NextResponse.json(
           { success: false, error: 'Invalid export type' },
@@ -37,7 +43,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function exportChat(sessionId: string | null, format: string) {
+async function exportChat(sessionId: string | null, format: string, user: AuthenticatedUser) {
   if (!sessionId) {
     return NextResponse.json(
       { success: false, error: 'Session ID required for chat export' },
@@ -58,6 +64,13 @@ async function exportChat(sessionId: string | null, format: string) {
     return NextResponse.json(
       { success: false, error: 'Session not found' },
       { status: 404 }
+    )
+  }
+
+  if (user.role !== 'admin' && session.userId !== user.userId) {
+    return NextResponse.json(
+      { success: false, error: 'You do not have access to this session' },
+      { status: 403 }
     )
   }
 
@@ -121,9 +134,12 @@ async function exportChat(sessionId: string | null, format: string) {
   )
 }
 
-async function exportDocuments(format: string) {
+async function exportDocuments(format: string, user: AuthenticatedUser) {
   const documents = await db.document.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      ...(user.role === 'admin' ? {} : { ownerId: user.userId })
+    },
     orderBy: { createdAt: 'desc' },
     include: {
       _count: {
@@ -177,28 +193,37 @@ async function exportDocuments(format: string) {
   )
 }
 
-async function exportStats(format: string) {
+async function exportStats(format: string, user: AuthenticatedUser) {
+  const documentWhere = {
+    isActive: true,
+    ...(user.role === 'admin' ? {} : { ownerId: user.userId })
+  }
+  const sessionWhere = user.role === 'admin' ? {} : { userId: user.userId }
+  const feedbackWhere = user.role === 'admin' ? {} : { userId: user.userId }
+
   const [documentCount, sessionCount, messageCount, feedbackCount] = await Promise.all([
-    db.document.count({ where: { isActive: true } }),
-    db.chatSession.count(),
-    db.chatMessage.count(),
-    db.feedback.count()
+    db.document.count({ where: documentWhere }),
+    db.chatSession.count({ where: sessionWhere }),
+    db.chatMessage.count({
+      where: user.role === 'admin' ? {} : { session: { userId: user.userId } }
+    }),
+    db.feedback.count({ where: feedbackWhere })
   ])
 
   const [categoryStats, yearStats] = await Promise.all([
     db.document.groupBy({
       by: ['category'],
-      where: { isActive: true },
+      where: documentWhere,
       _count: { id: true }
     }),
     db.document.groupBy({
       by: ['year'],
-      where: { isActive: true, year: { not: null } },
+      where: { ...documentWhere, year: { not: null } },
       _count: { id: true }
     })
   ])
 
-  const feedback = await db.feedback.findMany()
+  const feedback = await db.feedback.findMany({ where: feedbackWhere })
   const avgRating = feedback.length > 0
     ? feedback.reduce((sum, f) => sum + f.rating, 0) / feedback.length
     : 0

@@ -3,16 +3,14 @@ import { fileURLToPath } from "url";
 import type { NextConfig } from "next";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = path.resolve(configDir, "..");
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  outputFileTracingRoot: configDir,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  outputFileTracingRoot: workspaceRoot,
   reactStrictMode: false,
   turbopack: {
-    root: configDir,
+    root: workspaceRoot,
   },
   async rewrites() {
     const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";

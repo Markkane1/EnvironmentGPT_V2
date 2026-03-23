@@ -17,6 +17,8 @@ datasource db {
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
+  username    String?  @unique
+  passwordHash String?
   name        String
   role        String   @default("viewer") // admin, analyst, viewer, guest
   department  String?
@@ -25,13 +27,33 @@ model User {
   updatedAt   DateTime @updatedAt
   
   chatSessions ChatSession[]
+  documents    Document[]
   feedback     Feedback[]
+  refreshTokens RefreshToken[]
+  llmProvidersAdded LLMProvider[] @relation("AddedLLMProviders")
+}
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  hashedToken String   @unique
+  expiresAt   DateTime
+  revoked     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revoked])
 }
 
 // ==================== Knowledge Base Documents ====================
 
 model Document {
   id           String   @id @default(cuid())
+  ownerId      String?
   title        String
   content      String
   summary      String?
@@ -52,7 +74,9 @@ model Document {
   
   chunks       DocumentChunk[]
   chatSessions ChatSession[]
+  owner        User? @relation(fields: [ownerId], references: [id])
   
+  @@index([ownerId])
   @@index([category])
   @@index([year])
   @@index([isActive])
@@ -181,13 +205,17 @@ model LLMProvider {
   name            String   @unique                      // "OpenAI", "DeepSeek", "Ollama", "vLLM"
   displayName     String                               // Friendly name for UI
   providerType    String   @default("openai_compat")   // openai_compat, ollama, azure
-  baseUrl         String                               // https://api.openai.com/v1 or http://ollama:11434/v1
+  baseUrl         String                               // Base URL without /v1 suffix, e.g. https://api.openai.com or http://vllm:8000
   apiKeyEnvVar    String?                              // Environment variable name for API key (optional for local)
   modelId         String                               // gpt-4o, deepseek-chat, qwen3:8b, etc.
   defaultParams   String?  @default("{}")              // JSON: temperature, max_tokens, etc.
   role            String   @default("available")       // primary, fallback_1, fallback_2, available
   priority        Int      @default(100)               // Lower = higher priority for fallbacks
   isActive        Boolean  @default(true)
+  timeoutSeconds  Int      @default(120)
+  maxTokens       Int      @default(1024)
+  temperature     Float    @default(0.1)
+  notes           String?
   healthStatus    String   @default("unknown")         // healthy, unhealthy, unknown
   lastHealthCheck DateTime?
   requestCount    Int      @default(0)
@@ -196,6 +224,8 @@ model LLMProvider {
   addedBy         String?                              // User ID who added this provider
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  
+  addedByUser     User?    @relation("AddedLLMProviders", fields: [addedBy], references: [id], onDelete: SetNull)
   
   @@index([role])
   @@index([isActive])

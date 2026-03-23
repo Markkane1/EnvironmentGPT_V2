@@ -58,34 +58,34 @@ describe('infra API routes', () => {
   })
 
   describe('GET /api/health', () => {
-    it('returns healthy when core dependencies are available', async () => {
+    it('returns a minimal ok payload when core dependencies are available', async () => {
       ;(db.$queryRaw as jest.Mock).mockResolvedValueOnce(1)
 
       const response = await getHealth()
       const payload = await response.json()
 
       expect(response.status).toBe(200)
-      expect(payload.status).toBe('healthy')
-      expect(payload.version).toBe(APP_CONFIG.version)
-      expect(payload.service).toBe(APP_CONFIG.name)
-      expect(payload.checks).toEqual({
-        database: 'up',
-        cache: 'up',
-        embedding: 'up',
-        llm: 'up',
+      expect(payload).toEqual({
+        status: 'ok',
+        version: APP_CONFIG.version,
+        timestamp: expect.any(String),
       })
+      expect(payload.service).toBeUndefined()
+      expect(payload.checks).toBeUndefined()
     })
 
-    it('returns unhealthy when the database check fails', async () => {
+    it('returns degraded when the database check fails', async () => {
       ;(db.$queryRaw as jest.Mock).mockRejectedValueOnce(new Error('database unavailable'))
 
       const response = await getHealth()
       const payload = await response.json()
 
       expect(response.status).toBe(503)
-      expect(payload.status).toBe('unhealthy')
-      expect(payload.checks.database).toBe('down')
-      expect(payload.version).toBe(APP_CONFIG.version)
+      expect(payload).toEqual({
+        status: 'degraded',
+        version: APP_CONFIG.version,
+        timestamp: expect.any(String),
+      })
     })
   })
 })

@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Document } from '@/types'
-import { formatDate, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface DocumentListProps {
   onUploadClick?: () => void

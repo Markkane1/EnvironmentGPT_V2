@@ -29,7 +29,6 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   AlertCircle,
   CheckCircle,
@@ -57,6 +56,16 @@ interface LLMProvider {
   errorCount: number
   avgLatencyMs: number | null
   hasApiKey: boolean
+  apiKeyEnvVar?: string
+}
+
+interface ProviderStats {
+  totalProviders: number
+  activeProviders: number
+  healthyProviders: number
+  primaryProvider: string | null
+  totalRequests: number
+  totalErrors: number
 }
 
 const ROLE_OPTIONS = [
@@ -75,7 +84,7 @@ const PROVIDER_TYPES = [
 export function ProvidersSettingsPanel() {
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<any>(null)
+  const [stats, setStats] = useState<ProviderStats | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null)
 

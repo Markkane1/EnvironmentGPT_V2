@@ -23,7 +23,6 @@ import {
   ChevronLeft, 
   ChevronRight,
   MessageSquarePlus,
-  BookOpen,
   Settings,
   HelpCircle,
   Trash2,
@@ -34,7 +33,7 @@ import {
   History
 } from 'lucide-react'
 import { DOCUMENT_CATEGORIES, REPORT_SERIES, AUDIENCE_TYPES } from '@/lib/constants'
-import { ChatSession, Document } from '@/types'
+import { ChatSession } from '@/types'
 import { formatDate, cn } from '@/lib/utils'
 import { DocumentUploadModal } from '@/components/documents/document-upload-modal'
 import { DocumentList } from '@/components/documents/document-list'
@@ -334,10 +333,7 @@ export function Sidebar() {
           <TabsContent value="documents" className="flex-1 m-0">
             <DocumentList 
               onUploadClick={() => setShowUploadModal(true)}
-              onSelectDocument={(doc) => {
-                // Handle document selection
-                console.log('Selected document:', doc)
-              }}
+              onSelectDocument={() => {}}
             />
           </TabsContent>
 

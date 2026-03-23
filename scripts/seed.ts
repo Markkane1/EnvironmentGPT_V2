@@ -7,59 +7,62 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
+function normalizeProviderBaseUrl(rawUrl: string): string {
+  return rawUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+}
+
 // vLLM Provider Configuration
 // All providers use OpenAI-compatible /v1/chat/completions endpoint
 const VLLM_PROVIDERS = [
   {
-    name: 'vllm-qwen3-30b',
-    displayName: 'Qwen3-30B-A3B (vLLM)',
+    name: 'vLLM — Qwen3-30B-A3B',
+    displayName: 'vLLM — Qwen3-30B-A3B',
     providerType: 'openai_compat',
-    baseUrl: process.env.VLLM_BASE_URL || 'http://localhost:8000/v1',
+    baseUrl: normalizeProviderBaseUrl(process.env.VLLM_BASE_URL || 'http://vllm:8000'),
     apiKeyEnvVar: null, // No API key needed for local vLLM
-    modelId: 'Qwen/Qwen3-30B-A3B',
-    defaultParams: {
-      temperature: 0.7,
-      max_tokens: 4096,
-      top_p: 0.9,
-      repetition_penalty: 1.05
-    },
+    modelId: 'qwen3-30b-a3b',
+    defaultParams: {},
     role: 'primary',
     priority: 1,
     isActive: true,
+    timeoutSeconds: 120,
+    maxTokens: 1024,
+    temperature: 0.1,
+    notes: 'Default primary vLLM provider',
     healthStatus: 'unknown'
   },
   {
-    name: 'vllm-mistral-small',
-    displayName: 'Mistral Small 3.1 (vLLM)',
+    name: 'vLLM — Mistral Small 3.1',
+    displayName: 'vLLM — Mistral Small 3.1',
     providerType: 'openai_compat',
-    baseUrl: process.env.VLLM_FALLBACK_URL || process.env.VLLM_BASE_URL || 'http://localhost:8001/v1',
+    baseUrl: normalizeProviderBaseUrl(process.env.VLLM_FALLBACK_URL || process.env.VLLM_BASE_URL || 'http://vllm:8000'),
     apiKeyEnvVar: null,
-    modelId: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503',
-    defaultParams: {
-      temperature: 0.7,
-      max_tokens: 4096,
-      top_p: 0.9
-    },
+    modelId: 'mistral-small-3.1-22b',
+    defaultParams: {},
     role: 'fallback_1',
     priority: 2,
     isActive: true,
+    timeoutSeconds: 120,
+    maxTokens: 1024,
+    temperature: 0.1,
+    notes: 'Default first fallback vLLM provider',
     healthStatus: 'unknown'
   },
   {
-    name: 'vllm-qwen3-8b',
-    displayName: 'Qwen3-8B (vLLM)',
+    name: 'vLLM — Qwen3-8B',
+    displayName: 'vLLM — Qwen3-8B',
     providerType: 'openai_compat',
-    baseUrl: process.env.VLLM_FALLBACK2_URL || process.env.VLLM_BASE_URL || 'http://localhost:8002/v1',
+    baseUrl: normalizeProviderBaseUrl(process.env.VLLM_FALLBACK2_URL || process.env.VLLM_BASE_URL || 'http://vllm:8000'),
     apiKeyEnvVar: null,
-    modelId: 'Qwen/Qwen3-8B',
-    defaultParams: {
-      temperature: 0.7,
-      max_tokens: 2048,
-      top_p: 0.9
-    },
+    modelId: 'qwen3-8b',
+    defaultParams: {},
     role: 'fallback_2',
     priority: 3,
     isActive: true,
+    timeoutSeconds: 120,
+    maxTokens: 1024,
+    temperature: 0.1,
+    notes: 'Default second fallback vLLM provider',
     healthStatus: 'unknown'
   }
 ]
@@ -143,11 +146,16 @@ async function main() {
         data: {
           displayName: provider.displayName,
           baseUrl: provider.baseUrl,
+          apiKeyEnvVar: provider.apiKeyEnvVar,
           modelId: provider.modelId,
           defaultParams: JSON.stringify(provider.defaultParams),
           role: provider.role,
           priority: provider.priority,
-          isActive: provider.isActive
+          isActive: provider.isActive,
+          timeoutSeconds: provider.timeoutSeconds,
+          maxTokens: provider.maxTokens,
+          temperature: provider.temperature,
+          notes: provider.notes,
         }
       })
     } else {
@@ -164,6 +172,10 @@ async function main() {
           role: provider.role,
           priority: provider.priority,
           isActive: provider.isActive,
+          timeoutSeconds: provider.timeoutSeconds,
+          maxTokens: provider.maxTokens,
+          temperature: provider.temperature,
+          notes: provider.notes,
           healthStatus: provider.healthStatus
         }
       })
@@ -256,7 +268,7 @@ async function main() {
   console.log('')
   console.log('⚠️  Configuration Required:')
   console.log('   Set these environment variables for production:')
-  console.log('   - VLLM_BASE_URL (default: http://localhost:8000/v1)')
+  console.log('   - VLLM_BASE_URL (default: http://vllm:8000)')
   console.log('   - VLLM_FALLBACK_URL (optional, for fallback 1)')
   console.log('   - VLLM_FALLBACK2_URL (optional, for fallback 2)')
   console.log('   - AQI_API_KEY (for Punjab AQI connector)')

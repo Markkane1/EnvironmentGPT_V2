@@ -5,7 +5,7 @@
 
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
-import { DocumentChunk, RetrievalResult } from '@/types'
+import type { ChunkMetadata, RetrievalResult } from '@/types'
 import { RAG_CONFIG } from '@/lib/constants'
 
 // ==================== Types ====================
@@ -358,13 +358,20 @@ export class AdvancedEmbeddingService {
             ? (vectorScore * 0.7) + (keywordScore * 0.3)
             : vectorScore
           
+          const metadata = this.parseJson<Partial<ChunkMetadata>>(chunk.metadata)
           return {
             chunk: {
               id: chunk.id,
               documentId: chunk.documentId,
               content: chunk.content,
               chunkIndex: chunk.chunkIndex,
-              metadata: this.parseJson<Record<string, unknown>>(chunk.metadata) || {},
+              metadata: {
+                startPosition: metadata?.startPosition ?? 0,
+                endPosition: metadata?.endPosition ?? chunk.content.length,
+                wordCount: metadata?.wordCount ?? chunk.content.split(/\s+/).length,
+                pageNumber: metadata?.pageNumber,
+                section: metadata?.section,
+              },
               createdAt: chunk.createdAt
             },
             score: combinedScore,

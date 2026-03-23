@@ -49,7 +49,7 @@ async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
 }
 
 async function extractDocText(buffer: ArrayBuffer): Promise<string> {
-  const WordExtractor = require('word-extractor')
+  const { default: WordExtractor } = await import('word-extractor')
   const extractor = new WordExtractor()
   const document = await extractor.extract(Buffer.from(buffer))
 

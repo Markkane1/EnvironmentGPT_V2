@@ -46,12 +46,17 @@ export const rateLimitConfigs: Record<string, RateLimitConfig> = {
   },
   api: {
     windowMs: readPositiveIntegerEnv('RATE_LIMIT_WINDOW', 60 * 1000),
-    maxRequests: readPositiveIntegerEnv('RATE_LIMIT_MAX', 60),
+    maxRequests: readPositiveIntegerEnv('RATE_LIMIT_MAX', 100),
     blockDuration: readPositiveIntegerEnv('RATE_LIMIT_BLOCK_DURATION', 60 * 1000)
   },
+  admin: {
+    windowMs: readPositiveIntegerEnv('RATE_LIMIT_ADMIN_WINDOW', 60 * 1000),
+    maxRequests: readPositiveIntegerEnv('RATE_LIMIT_ADMIN_MAX', 30),
+    blockDuration: readPositiveIntegerEnv('RATE_LIMIT_ADMIN_BLOCK_DURATION', 5 * 60 * 1000)
+  },
   auth: {
-    windowMs: readPositiveIntegerEnv('RATE_LIMIT_AUTH_WINDOW', 15 * 60 * 1000),
-    maxRequests: readPositiveIntegerEnv('RATE_LIMIT_AUTH_MAX', 5),
+    windowMs: readPositiveIntegerEnv('RATE_LIMIT_AUTH_WINDOW', 60 * 1000),
+    maxRequests: readPositiveIntegerEnv('RATE_LIMIT_AUTH_MAX', 10),
     blockDuration: readPositiveIntegerEnv('RATE_LIMIT_AUTH_BLOCK_DURATION', 30 * 60 * 1000)
   }
 }
@@ -178,7 +183,7 @@ export function getRateLimitHeaders(
  * Higher-order function to wrap API handlers with rate limiting
  */
 export function withRateLimit(
-  handler: (request: Request) => Promise<Response>,
+  handler: (request: Request) => Promise<Response | undefined>,
   endpoint: keyof typeof rateLimitConfigs = 'api'
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
@@ -204,6 +209,21 @@ export function withRateLimit(
     }
     
     const response = await handler(request)
+
+    if (!response) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Request handler did not return a response.',
+        }),
+        {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    }
     
     // Add rate limit headers to response
     const headers = getRateLimitHeaders(endpoint, result.remaining, result.resetTime)

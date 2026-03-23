@@ -6,7 +6,7 @@
 import { db } from '@/lib/db'
 import { embeddingService } from './embedding-service'
 import { RAG_CONFIG } from '@/lib/constants'
-import type { Document, DocumentChunk } from '@/types'
+import type { AudienceType, Document, DocumentCategory } from '@/types'
 import type { CreateDocumentInput } from '@/lib/validators'
 import { extractTextFromDocumentFile } from '@/lib/utils/document-extraction'
 
@@ -16,11 +16,12 @@ export class DocumentIngestionService {
   /**
    * Ingest a document from text content
    */
-  async ingestDocument(input: CreateDocumentInput & { content: string }): Promise<Document> {
+  async ingestDocument(input: CreateDocumentInput & { content: string; ownerId?: string }): Promise<Document> {
     try {
       // Create the document
       const document = await db.document.create({
         data: {
+          ownerId: input.ownerId,
           title: input.title,
           content: input.content,
           source: input.source,
@@ -44,12 +45,13 @@ export class DocumentIngestionService {
 
       return {
         id: document.id,
+        ownerId: document.ownerId || undefined,
         title: document.title,
         content: document.content,
-        category: document.category || undefined,
+        category: (document.category || input.category) as DocumentCategory,
         reportSeries: document.reportSeries || undefined,
         year: document.year || undefined,
-        audience: document.audience,
+        audience: document.audience as AudienceType,
         author: document.author || undefined,
         tags: input.tags || [],
         fileType: document.fileType || undefined,

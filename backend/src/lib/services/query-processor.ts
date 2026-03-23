@@ -3,7 +3,7 @@
 // Phase 4: Query Preprocessing and Expansion
 // =====================================================
 
-import { DOCUMENT_CATEGORIES, PUNJAB_REGIONS, AQI_PARAMETERS } from '@/lib/constants'
+import { AQI_PARAMETERS } from '@/lib/constants'
 
 // ==================== Types ====================
 

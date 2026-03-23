@@ -10,10 +10,9 @@ import {
   ChatRequest, 
   ChatResponse, 
   SourceReference, 
-  MessageRole,
   RAGConfig 
 } from '@/types'
-import { RAG_CONFIG, AUDIENCE_TYPES } from '@/lib/constants'
+import { RAG_CONFIG } from '@/lib/constants'
 
 // ==================== RAG Service Class ====================
 
@@ -36,8 +35,6 @@ export class RAGService {
    * Process a chat request using RAG
    */
   async processQuery(request: ChatRequest): Promise<ChatResponse> {
-    const startTime = Date.now()
-    
     try {
       await this.initialize()
 
@@ -73,10 +70,8 @@ export class RAGService {
       // Step 5: Format sources
       const sources = await this.formatSources(retrievalResult.chunks, retrievalResult.scores)
 
-      const responseTime = Date.now() - startTime
-
       // Step 6: Save to session if provided
-      let sessionId = request.sessionId
+      const sessionId = request.sessionId
       let messageId: string | undefined
 
       if (sessionId) {
@@ -123,8 +118,6 @@ export class RAGService {
    * Build system prompt based on audience
    */
   private buildSystemPrompt(audience: string, context: string): string {
-    const audienceConfig = AUDIENCE_TYPES.find(a => a.value === audience)
-    
     const audienceInstructions: Record<string, string> = {
       'General Public': `
 - Explain concepts in simple, easy-to-understand language

@@ -14,6 +14,11 @@ const config: Config = {
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/backend/src/$1',
+    '^next/server$': '<rootDir>/node_modules/next/server.js',
+    '^next/headers$': '<rootDir>/node_modules/next/headers.js',
+    '^next/navigation$': '<rootDir>/node_modules/next/navigation.js',
+    '^next/link$': '<rootDir>/node_modules/next/link.js',
+    '^next/image$': '<rootDir>/node_modules/next/image.js',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   setupFilesAfterEnv: ['<rootDir>/tests/config/jest.setup.ts'],
@@ -33,20 +38,10 @@ const config: Config = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: {
-        jsx: 'react-jsx',
-        esModuleInterop: true,
-        module: 'commonjs',
-        moduleResolution: 'node',
-        skipLibCheck: true,
-        strict: false,
-        target: 'ES2020',
-        lib: ['ES2020', 'DOM'],
-      }
+      tsconfig: path.join(rootDir, 'backend/tsconfig.json'),
     }],
   },
   moduleDirectories: ['node_modules', '<rootDir>/'],
-  verbose: true,
   testTimeout: 15000,
   clearMocks: true,
   restoreMocks: true,

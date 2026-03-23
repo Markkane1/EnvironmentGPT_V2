@@ -3,8 +3,6 @@
 // Phase 5: Dynamic Prompt Engineering System
 // =====================================================
 
-import { AUDIENCE_TYPES, DOCUMENT_CATEGORIES } from '@/lib/constants'
-
 // ==================== Types ====================
 
 export interface PromptTemplate {

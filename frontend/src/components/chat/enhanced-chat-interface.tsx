@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { 
   Send, 
   Bot, 
@@ -19,9 +19,7 @@ import {
   Copy,
   Check,
   RotateCcw,
-  PanelRightOpen,
   MessageSquarePlus,
-  AlertTriangle
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { useAppSettingsStore } from '@/lib/app-settings'
@@ -121,7 +119,7 @@ export function EnhancedChatInterface() {
           variant: 'destructive'
         })
       }
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to connect to the server',
@@ -130,7 +128,7 @@ export function EnhancedChatInterface() {
     } finally {
       setLoading(false)
     }
-  }, [input, isLoading, addMessage, setLoading, selectedAudience, selectedCategory, currentSessionId, setCurrentSession])
+  }, [input, isLoading, addMessage, setLoading, selectedAudience, selectedCategory, currentSessionId, setCurrentSession, showSources])
 
   // Keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -201,7 +199,7 @@ export function EnhancedChatInterface() {
           setLastConfidence(0)
         }
       }
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to regenerate response',

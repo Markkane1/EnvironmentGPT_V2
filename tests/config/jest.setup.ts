@@ -2,6 +2,10 @@ import '@testing-library/jest-dom'
 import { Request as FetchRequest, Response as FetchResponse, Headers as FetchHeaders } from 'cross-fetch'
 import { serialize, deserialize } from 'v8'
 
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = 'test-jwt-secret'
+}
+
 // This is only applied for jsdom environment tests
 // Check if window is defined (jsdom environment)
 const isJsDom = typeof window !== 'undefined'
@@ -128,4 +132,11 @@ afterAll(() => {
 // Clean up after each test
 afterEach(() => {
   jest.clearAllMocks()
+
+  try {
+    const { clearRateLimitStore } = require('../../backend/src/lib/security/rate-limiter') as typeof import('../../backend/src/lib/security/rate-limiter')
+    clearRateLimitStore()
+  } catch {
+    // Backend modules are not required in every test environment.
+  }
 })

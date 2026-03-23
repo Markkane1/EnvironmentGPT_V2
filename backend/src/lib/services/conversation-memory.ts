@@ -93,9 +93,9 @@ export class ConversationMemoryService {
         sessionId: msg.sessionId,
         role: msg.role as MessageRole,
         content: msg.content,
-        sources: msg.sources || undefined,
+        sources: msg.sources ?? undefined,
         timestamp: msg.createdAt,
-        metadata: this.parseMetadata(msg.metadata)
+        metadata: this.parseMetadata(msg.metadata ?? undefined)
       }))
     } catch (error) {
       console.error('Failed to get session messages:', error)
@@ -166,7 +166,7 @@ export class ConversationMemoryService {
         lastMessage: messages[messages.length - 1]?.createdAt || session.createdAt,
         topics,
         entities,
-        summary: session.summary || undefined
+        summary: messages.length > 0 ? this.createSummary(this.toConversationMessages(messages)) : undefined
       }
     } catch (error) {
       console.error('Failed to get conversation summary:', error)
@@ -187,12 +187,6 @@ export class ConversationMemoryService {
 
       // Generate summary from messages
       const summary = this.createSummary(messages)
-      
-      // Save to database
-      await db.chatSession.update({
-        where: { id: sessionId },
-        data: { summary }
-      })
 
       return summary
     } catch (error) {
@@ -205,7 +199,8 @@ export class ConversationMemoryService {
    * Get recent conversations for a user
    */
   async getRecentConversations(
-    limit: number = 10
+    limit: number = 10,
+    userId?: string
   ): Promise<Array<{
     id: string
     title: string
@@ -215,6 +210,7 @@ export class ConversationMemoryService {
   }>> {
     try {
       const sessions = await db.chatSession.findMany({
+        where: userId ? { userId } : undefined,
         orderBy: { updatedAt: 'desc' },
         take: limit,
         include: {
@@ -318,7 +314,9 @@ export class ConversationMemoryService {
 
       await db.chatSession.update({
         where: { id: sessionId },
-        data: { title: 'New Conversation', summary: null }
+        data: {
+          title: 'New Conversation'
+        }
       })
 
       return true
@@ -403,6 +401,28 @@ export class ConversationMemoryService {
     return evolution
   }
 
+  private toConversationMessages(
+    messages: Array<{
+      id: string
+      sessionId: string
+      role: string
+      content: string
+      sources: string | null
+      metadata: string | null
+      createdAt: Date
+    }>
+  ): ConversationMessage[] {
+    return messages.map((message) => ({
+      id: message.id,
+      sessionId: message.sessionId,
+      role: message.role as MessageRole,
+      content: message.content,
+      sources: message.sources ?? undefined,
+      timestamp: message.createdAt,
+      metadata: this.parseMetadata(message.metadata ?? undefined),
+    }))
+  }
+
   // ==================== Entity Extraction ====================
 
   private extractEntities(messages: string[]): ExtractedEntities {
@@ -420,11 +440,6 @@ export class ConversationMemoryService {
       }
     }
 
-    const categories = [
-      'Air Quality', 'Water Resources', 'Climate Change', 
-      'Waste Management', 'Biodiversity', 'Policy & Regulation'
-    ]
-    
     const detectedCategories: string[] = []
     const categoryKeywords: Record<string, string[]> = {
       'Air Quality': ['air', 'smog', 'pollution', 'pm2.5', 'emission'],

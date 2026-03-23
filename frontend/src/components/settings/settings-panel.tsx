@@ -49,7 +49,7 @@ export function SettingsPanel() {
         description: 'Your preferences have been updated.'
       })
       setTimeout(() => setSaved(false), 2000)
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to save settings',
@@ -84,7 +84,7 @@ export function SettingsPanel() {
         title: 'Export complete',
         description: 'Your data has been downloaded.'
       })
-    } catch (error) {
+    } catch {
       toast({
         title: 'Export failed',
         description: 'Could not export data',

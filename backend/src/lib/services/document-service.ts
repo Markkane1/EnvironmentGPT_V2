@@ -4,19 +4,37 @@
 // =====================================================
 
 import { db } from '@/lib/db'
+import type { Prisma } from '@prisma/client'
 import { 
   Document, 
+  DocumentCategory,
   DocumentFilter, 
-  DocumentChunk,
   SearchResult 
 } from '@/types'
 import type { CreateDocumentInput, UpdateDocumentInput } from '@/lib/validators'
 import { 
-  matchesFilter, 
   calculateRelevanceScore, 
   createChunks,
-  extractKeywords 
 } from '@/lib/utils'
+
+type DocumentRecordWithChunks = Prisma.DocumentGetPayload<{
+  include: { chunks: true }
+}>
+
+type DocumentRecord = Prisma.DocumentGetPayload<Record<string, never>>
+type DocumentRecordLike = DocumentRecord | DocumentRecordWithChunks
+type DocumentChunkRecord = DocumentRecordWithChunks['chunks'][number]
+type DocumentWhereInput = {
+  isActive: boolean
+  ownerId?: string
+  category?: DocumentCategory
+  reportSeries?: string
+  audience?: Document['audience']
+  year?: {
+    gte?: number
+    lte?: number
+  }
+}
 
 // ==================== Document Service Class ====================
 
@@ -24,9 +42,10 @@ export class DocumentService {
   /**
    * Create a new document
    */
-  async createDocument(input: CreateDocumentInput): Promise<Document> {
+  async createDocument(input: CreateDocumentInput & { ownerId?: string }): Promise<Document> {
     const document = await db.document.create({
       data: {
+        ownerId: input.ownerId,
         title: input.title,
         content: input.content,
         source: input.source,
@@ -122,9 +141,14 @@ export class DocumentService {
   async listDocuments(
     filter?: DocumentFilter,
     page: number = 1,
-    pageSize: number = 10
+    pageSize: number = 10,
+    ownerId?: string
   ): Promise<SearchResult> {
-    const where: Record<string, unknown> = { isActive: true }
+    const where: DocumentWhereInput = { isActive: true }
+
+    if (ownerId) {
+      where.ownerId = ownerId
+    }
     
     if (filter?.category) {
       where.category = filter.category
@@ -186,10 +210,11 @@ export class DocumentService {
   async searchDocuments(
     query: string,
     filter?: DocumentFilter,
-    limit: number = 10
+    limit: number = 10,
+    ownerId?: string
   ): Promise<SearchResult> {
     // Get base list
-    const baseResult = await this.listDocuments(filter, 1, 100)
+    const baseResult = await this.listDocuments(filter, 1, 100, ownerId)
     
     // Score and sort by relevance
     const scored = baseResult.documents
@@ -300,18 +325,32 @@ export class DocumentService {
 
   // ==================== Private Methods ====================
 
-  private mapToDocument(doc: any): Document {
+  private mapToDocument(doc: DocumentRecordLike): Document {
+    const parsedChunks = 'chunks' in doc
+      ? doc.chunks?.map((c: DocumentChunkRecord) => ({
+          id: c.id,
+          documentId: c.documentId,
+          content: c.content,
+          chunkIndex: c.chunkIndex,
+          metadata: c.metadata
+            ? JSON.parse(c.metadata)
+            : { startPosition: 0, endPosition: c.content.length, wordCount: c.content.split(/\s+/).length },
+          createdAt: c.createdAt
+        }))
+      : undefined
+
     return {
       id: doc.id,
+      ownerId: 'ownerId' in doc ? (doc.ownerId || undefined) : undefined,
       title: doc.title,
       content: doc.content,
       summary: doc.summary || undefined,
       source: doc.source || undefined,
       sourceUrl: doc.sourceUrl || undefined,
-      category: doc.category,
+      category: (doc.category || 'Policy & Regulation') as Document['category'],
       reportSeries: doc.reportSeries || undefined,
       year: doc.year || undefined,
-      audience: doc.audience,
+      audience: doc.audience as Document['audience'],
       author: doc.author || undefined,
       tags: doc.tags ? JSON.parse(doc.tags) : [],
       isActive: doc.isActive,
@@ -320,14 +359,7 @@ export class DocumentService {
       language: doc.language,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
-      chunks: doc.chunks?.map((c: any) => ({
-        id: c.id,
-        documentId: c.documentId,
-        content: c.content,
-        chunkIndex: c.chunkIndex,
-        metadata: c.metadata ? JSON.parse(c.metadata) : {},
-        createdAt: c.createdAt
-      }))
+      chunks: parsedChunks
     }
   }
 

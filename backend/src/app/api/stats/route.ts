@@ -6,15 +6,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getHealthSnapshot } from '@/lib/monitoring/health'
+import { buildStatsHealthPayload } from '@/lib/monitoring/health-response'
 import { documentService } from '@/lib/services/document-service'
+import { authenticateToken, requireAdmin } from '@/middleware/auth'
+import { runRouteMiddleware } from '@/lib/route-middleware'
 import { APP_CONFIG, SYSTEM_LIMITS, DEFAULT_FEATURE_FLAGS } from '@/lib/constants'
 
 // Get system statistics
 export async function GET(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type') || 'overview'
-    
+
     switch (type) {
       case 'overview':
         return await getOverviewStats()
@@ -34,7 +40,6 @@ export async function GET(request: NextRequest) {
           { status: 400 }
         )
     }
-    
   } catch (error) {
     console.error('Stats API error:', error)
     return NextResponse.json(
@@ -49,9 +54,9 @@ async function getOverviewStats() {
     db.document.count({ where: { isActive: true } }),
     db.chatSession.count(),
     db.chatMessage.count(),
-    db.feedback.count()
+    db.feedback.count(),
   ])
-  
+
   return NextResponse.json({
     success: true,
     statistics: {
@@ -60,7 +65,7 @@ async function getOverviewStats() {
       messages: messageCount,
       feedback: feedbackCount,
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 }
 
@@ -77,10 +82,10 @@ async function getDocumentStats() {
         category: true,
         year: true,
         createdAt: true,
-      }
-    })
+      },
+    }),
   ])
-  
+
   return NextResponse.json({
     success: true,
     statistics: {
@@ -91,9 +96,9 @@ async function getDocumentStats() {
         category: doc.category || 'Uncategorized',
         year: doc.year,
         createdAt: doc.createdAt.toISOString(),
-      }))
+      })),
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 }
 
@@ -101,24 +106,24 @@ async function getChatStats() {
   const now = new Date()
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
   const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  
+
   const [sessionsToday, sessionsWeek, totalMessages, latencyStats] = await Promise.all([
     db.chatSession.count({
-      where: { createdAt: { gte: oneDayAgo } }
+      where: { createdAt: { gte: oneDayAgo } },
     }),
     db.chatSession.count({
-      where: { createdAt: { gte: oneWeekAgo } }
+      where: { createdAt: { gte: oneWeekAgo } },
     }),
     db.chatMessage.count({ where: { role: 'user' } }),
     db.lLMRequestLog.aggregate({
       where: {
         latencyMs: { not: null },
-        createdAt: { gte: oneWeekAgo }
+        createdAt: { gte: oneWeekAgo },
       },
-      _avg: { latencyMs: true }
-    })
+      _avg: { latencyMs: true },
+    }),
   ])
-  
+
   return NextResponse.json({
     success: true,
     statistics: {
@@ -127,7 +132,7 @@ async function getChatStats() {
       totalQueries: totalMessages,
       avgResponseTime: Math.round(latencyStats._avg.latencyMs || 0),
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 }
 
@@ -136,56 +141,45 @@ async function getFeedbackStats() {
     db.feedback.findMany(),
     db.feedback.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 5
-    })
+      take: 5,
+    }),
   ])
-  
+
   const avgRating = allFeedback.length > 0
-    ? allFeedback.reduce((sum, f) => sum + f.rating, 0) / allFeedback.length
+    ? allFeedback.reduce((sum, feedback) => sum + feedback.rating, 0) / allFeedback.length
     : 0
-  
+
   const ratingDistribution: Record<number, number> = {}
   for (let i = 1; i <= 5; i++) {
-    ratingDistribution[i] = allFeedback.filter(f => f.rating === i).length
+    ratingDistribution[i] = allFeedback.filter(feedback => feedback.rating === i).length
   }
-  
+
   return NextResponse.json({
     success: true,
     statistics: {
       total: allFeedback.length,
       avgRating: Math.round(avgRating * 10) / 10,
       ratingDistribution,
-        positiveRate: allFeedback.length > 0
-        ? Math.round((allFeedback.filter(f => f.rating >= 4).length / allFeedback.length) * 100)
+      positiveRate: allFeedback.length > 0
+        ? Math.round((allFeedback.filter(feedback => feedback.rating >= 4).length / allFeedback.length) * 100)
         : 0,
       recentFeedback: recentFeedback.map((feedback) => ({
         id: feedback.id,
         rating: feedback.rating,
         comment: feedback.comment || '',
-        createdAt: feedback.createdAt.toISOString()
-      }))
+        createdAt: feedback.createdAt.toISOString(),
+      })),
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 }
 
 async function getHealthStatus() {
   const snapshot = await getHealthSnapshot()
-  
+
   return NextResponse.json({
     success: true,
-    health: {
-      status: snapshot.status,
-      timestamp: snapshot.timestamp,
-      services: snapshot.services.map((service) => ({
-        name: service.name.toLowerCase(),
-        status: service.status === 'up' ? 'up' : 'down',
-        latency: service.latency,
-        message: service.message
-      })),
-      checks: snapshot.checks,
-      uptime: snapshot.uptime
-    }
+    health: buildStatsHealthPayload(snapshot),
   })
 }
 
@@ -197,6 +191,6 @@ function getConfig() {
       limits: SYSTEM_LIMITS,
       features: DEFAULT_FEATURE_FLAGS,
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 }

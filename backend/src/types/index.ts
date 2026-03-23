@@ -8,9 +8,11 @@
 export interface User {
   id: string
   email: string
+  username?: string
   name: string
   role: UserRole
   department?: string
+  isActive: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -29,6 +31,7 @@ export interface UserSession {
 
 export interface Document {
   id: string
+  ownerId?: string
   title: string
   content: string
   summary?: string

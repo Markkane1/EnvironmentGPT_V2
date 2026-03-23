@@ -21,15 +21,16 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2, Upload, FileText } from 'lucide-react'
-import { DOCUMENT_CATEGORIES, AUDIENCE_TYPES } from '@/lib/constants'
+import { DOCUMENT_CATEGORIES, AUDIENCE_TYPES, SUPPORTED_FILE_TYPES } from '@/lib/constants'
 import { toast } from '@/hooks/use-toast'
-import { SUPPORTED_DOCUMENT_ACCEPT } from '@/lib/utils/document-upload'
 
 interface DocumentUploadModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onUploadComplete?: () => void
 }
+
+const SUPPORTED_DOCUMENT_ACCEPT = SUPPORTED_FILE_TYPES.documents.join(',')
 
 export function DocumentUploadModal({ 
   open, 

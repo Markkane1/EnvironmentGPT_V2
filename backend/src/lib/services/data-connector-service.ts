@@ -5,6 +5,7 @@
 // =====================================================
 
 import { db } from '@/lib/db'
+import type { Prisma } from '@prisma/client'
 
 // ==================== Types ====================
 
@@ -71,6 +72,12 @@ export interface EnrichedContext {
     timestamp: Date
   }>
 }
+
+type ConnectorRecord = Prisma.DataConnectorGetPayload<{
+  include: { topicMappings: true }
+}>
+
+type ConnectorTopicMappingRecord = ConnectorRecord['topicMappings'][number]
 
 // ==================== Data Connector Service ====================
 
@@ -554,7 +561,7 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
         if (queryContext?.location) params.location = queryContext.location
         if (queryContext?.date) params.date = queryContext.date
 
-        const { data, cached } = await this.fetchData(connector, params)
+        const { data } = await this.fetchData(connector, params)
         const contextTemplate = this.buildInjectionTemplate(connector, data)
 
         // Inject based on method
@@ -834,7 +841,7 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
   /**
    * Map database record to config
    */
-  private mapToConfig(connector: any): DataConnectorConfig {
+  private mapToConfig(connector: ConnectorRecord): DataConnectorConfig {
     return {
       id: connector.id,
       name: connector.name,
@@ -858,7 +865,7 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
       lastFetchError: connector.lastFetchError,
       requestCount: connector.requestCount,
       errorCount: connector.errorCount,
-      topicMappings: connector.topicMappings?.map((tm: any) => ({
+      topicMappings: connector.topicMappings?.map((tm: ConnectorTopicMappingRecord) => ({
         id: tm.id,
         connectorId: tm.connectorId,
         topic: tm.topic,

@@ -202,13 +202,13 @@ export function truncateText(text: string, maxLength: number = 200): string {
 /**
  * Debounce function
  */
-export function debounce<T extends (...args: unknown[]) => unknown>(
-  func: T,
+export function debounce<Args extends unknown[]>(
+  func: (...args: Args) => unknown,
   wait: number
-): (...args: Parameters<T>) => void {
+): (...args: Args) => void {
   let timeout: NodeJS.Timeout | null = null
   
-  return (...args: Parameters<T>) => {
+  return (...args: Args) => {
     if (timeout) clearTimeout(timeout)
     timeout = setTimeout(() => func(...args), wait)
   }

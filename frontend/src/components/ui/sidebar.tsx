@@ -31,6 +31,7 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+const SIDEBAR_SKELETON_WIDTHS = ["50%", "60%", "70%", "80%", "90%"] as const
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -606,10 +607,12 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
+  const skeletonId = React.useId()
+  const width =
+    SIDEBAR_SKELETON_WIDTHS[
+      Array.from(skeletonId).reduce((sum, char) => sum + char.charCodeAt(0), 0) %
+        SIDEBAR_SKELETON_WIDTHS.length
+    ]
 
   return (
     <div

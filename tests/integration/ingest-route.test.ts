@@ -29,6 +29,7 @@ jest.mock('@/lib/services/embedding-service', () => ({
 
 import { POST } from '@/app/api/ingest/route'
 import { documentIngestionService } from '@/lib/services/document-ingestion-service'
+import { createAuthHeaders } from '../helpers/auth'
 
 function createMultipartRequest(fields: Record<string, string | File>): Request {
   const formData = new FormData()
@@ -39,6 +40,7 @@ function createMultipartRequest(fields: Record<string, string | File>): Request 
 
   return new Request('http://localhost/api/ingest', {
     method: 'POST',
+    headers: createAuthHeaders(),
     body: formData,
   })
 }
@@ -47,6 +49,7 @@ function createJsonRequest(body: Record<string, unknown>): Request {
   return new Request('http://localhost/api/ingest', {
     method: 'POST',
     headers: {
+      ...createAuthHeaders(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -160,6 +163,38 @@ describe('/api/ingest', () => {
         source: 'update.md',
         fileType: 'text/markdown',
         fileSize: file.size,
+      })
+    )
+  })
+
+  it('sanitizes multipart filenames before persisting metadata', async () => {
+    const content = '# Punjab Environmental Update\n\nAir monitoring coverage expanded significantly across districts. '.repeat(3)
+    const file = new File([content], '..\\..\\secret\\update.md', { type: 'text/markdown' })
+
+    ;(documentIngestionService.ingestDocument as jest.Mock).mockResolvedValue({
+      id: 'doc-safe',
+      title: 'update',
+      content,
+      category: 'Policy & Regulation',
+      audience: 'General Public',
+      tags: [],
+      isActive: true,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    const request = createMultipartRequest({
+      file,
+      category: 'Policy & Regulation',
+    })
+
+    const response = await POST(request as unknown as Parameters<typeof POST>[0])
+
+    expect(response.status).toBe(201)
+    expect(documentIngestionService.ingestDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'update',
+        source: 'update.md',
       })
     )
   })

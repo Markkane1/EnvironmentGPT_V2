@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { createAuthHeaders } from '../helpers/auth'
 
 jest.mock('@/lib/services/document-service', () => ({
   documentService: {
@@ -21,6 +22,7 @@ describe('/api/documents contract', () => {
   it('returns a single document when an id query param is provided', async () => {
     ;(documentService.getDocument as jest.Mock).mockResolvedValue({
       id: 'doc-1',
+      ownerId: 'viewer-user',
       title: 'Punjab Air Quality Report',
       content: 'Full document text',
       category: 'Air Quality',
@@ -32,7 +34,9 @@ describe('/api/documents contract', () => {
       updatedAt: new Date('2026-03-20T00:00:00.000Z'),
     })
 
-    const response = await GET(new NextRequest('http://localhost/api/documents?id=doc-1'))
+    const response = await GET(new NextRequest('http://localhost/api/documents?id=doc-1', {
+      headers: createAuthHeaders('viewer', 'viewer-user'),
+    }))
     const body = await response.json()
 
     expect(body.success).toBe(true)

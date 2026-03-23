@@ -1,6 +1,6 @@
 # EnvironmentGPT
 
-EnvironmentGPT is a Next.js application for EPA Punjab that combines document ingestion, retrieval-augmented chat, provider-managed LLM routing, live connector enrichment, and admin monitoring. Users can upload supported documents into the knowledge base, ask environmental questions about Punjab, inspect sources, and manage providers, connectors, cache, and system health from the admin UI.
+EnvironmentGPT is a Next.js workspace for EPA Punjab that combines a frontend knowledge assistant, backend ingestion and retrieval APIs, live data connector administration, and PostgreSQL-backed persistence. Users can upload supported documents, ask environmental questions about Punjab, inspect cited sources, and manage providers, connectors, cache, and system health from the admin UI.
 
 ## Tech Stack
 - Next.js 16 with React 19
@@ -15,38 +15,45 @@ EnvironmentGPT is a Next.js application for EPA Punjab that combines document in
 - Node.js 20 or newer recommended
 - npm
 - PostgreSQL 14+ available locally or remotely
-- Docker Desktop if you want to use `docker compose` helpers
-- Playwright browsers installed for E2E: `npx playwright install`
+- Docker Desktop if you want to use the optional compose helpers
+- Playwright browsers for E2E: `npx playwright install`
 
 ## Installation
 ```bash
 npm install
 copy .env.example .env.local
-npm run db:up
-npm run db:push
-npm run db:seed
 ```
 
-If you do not want to use Docker for PostgreSQL, set `DATABASE_URL` in `.env.local` to a running PostgreSQL instance before `npm run db:push`.
+If you are using a local PostgreSQL instance, set `DATABASE_URL` in `.env.local` before running the database scripts.
 
 ## Running Locally
-Start the app:
+Start both apps through the root orchestrator:
 
 ```bash
 npm run dev
 ```
 
+Run a single workspace if needed:
+
+```bash
+npm run dev:frontend
+npm run dev:backend
+```
+
 Useful supporting commands:
 
 ```bash
-npm run db:up
-npm run db:down
+npm run build
+npm run build:frontend
+npm run build:backend
+npm run lint
+npm run db:init
 npm run db:push
 npm run db:generate
+npm run db:migrate
+npm run db:reset
 npm run db:seed
 npm run db:setup
-npm run build
-npm run start
 ```
 
 ## Running Tests
@@ -74,12 +81,18 @@ npm test -- --runInBand
 ## Folder Structure
 ```text
 .
-|-- src/
-|   |-- app/
-|   |-- components/
-|   |-- hooks/
-|   |-- lib/
-|   `-- types/
+|-- backend/
+|   |-- src/
+|   |-- prisma/
+|   |-- next.config.ts
+|   |-- package.json
+|   `-- tsconfig.json
+|-- frontend/
+|   |-- src/
+|   |-- public/
+|   |-- next.config.ts
+|   |-- package.json
+|   `-- tsconfig.json
 |-- tests/
 |   |-- unit/
 |   |-- integration/
@@ -92,12 +105,14 @@ npm test -- --runInBand
 |-- docs/
 |-- infra/
 |-- scripts/
-|-- prisma/
-`-- public/
+|-- .env.example
+|-- .gitignore
+|-- package.json
+`-- tsconfig.json
 ```
 
 ## Environment Variables
-See [.env.example](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/.env.example) for the canonical list. The current runtime reads or seeds around these values:
+See [.env.example](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/.env.example) for the canonical list. The current runtime reads or seeds around these values:
 
 - `NODE_ENV`
 - `PORT`
@@ -132,11 +147,11 @@ See [.env.example](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentG
 - `.txt`
 
 ## Further Documentation
-- [docs/PROJECT_STRUCTURE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/PROJECT_STRUCTURE.md)
-- [docs/ENVIRONMENT_SETUP.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/ENVIRONMENT_SETUP.md)
-- [docs/USER_GUIDE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/USER_GUIDE.md)
-- [docs/VLLM_INTEGRATION_GUIDE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/VLLM_INTEGRATION_GUIDE.md)
+- [docs/PROJECT_STRUCTURE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/PROJECT_STRUCTURE.md)
+- [docs/ENVIRONMENT_SETUP.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/ENVIRONMENT_SETUP.md)
+- [docs/USER_GUIDE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/USER_GUIDE.md)
+- [docs/VLLM_INTEGRATION_GUIDE.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/VLLM_INTEGRATION_GUIDE.md)
+- [docs/testing/CODEXTESTING.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/testing/CODEXTESTING.md)
+- [docs/testing/SECURITY_TESTING.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/docs/testing/SECURITY_TESTING.md)
 - Deployment and proxy assets live under `infra/`
-- [AGENTS.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/AGENTS.md)
-- [CODEXTESTING.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/testing/CODEXTESTING.md)
-- [SECURITY_TESTING.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/docs/testing/SECURITY_TESTING.md)
+- [AGENTS.md](/c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/ENVIRONMENTGPT_V2/AGENTS.md)

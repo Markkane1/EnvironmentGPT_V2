@@ -60,6 +60,13 @@ jest.mock('@/lib/services/llm-provider-registry', () => ({
 import { db } from '@/lib/db'
 import { documentService } from '@/lib/services/document-service'
 import { GET } from '@/app/api/stats/route'
+import { createAuthHeaders } from '../helpers/auth'
+
+function adminRequest(url: string): NextRequest {
+  return new NextRequest(url, {
+    headers: createAuthHeaders('admin', 'admin-user'),
+  })
+}
 
 describe('/api/stats contract', () => {
   beforeEach(() => {
@@ -82,7 +89,7 @@ describe('/api/stats contract', () => {
       },
     ])
 
-    const response = await GET(new NextRequest('http://localhost/api/stats?type=documents'))
+    const response = await GET(adminRequest('http://localhost/api/stats?type=documents'))
     const body = await response.json()
 
     expect(body.statistics.recentlyAdded).toEqual([
@@ -103,7 +110,7 @@ describe('/api/stats contract', () => {
       _avg: { latencyMs: 187.6 },
     })
 
-    const response = await GET(new NextRequest('http://localhost/api/stats?type=chat'))
+    const response = await GET(adminRequest('http://localhost/api/stats?type=chat'))
     const body = await response.json()
 
     expect(body.statistics).toMatchObject({
@@ -123,7 +130,7 @@ describe('/api/stats contract', () => {
         { id: 'feedback-1', rating: 5, comment: 'Helpful', createdAt: new Date('2026-03-22T00:00:00.000Z') },
       ])
 
-    const response = await GET(new NextRequest('http://localhost/api/stats?type=feedback'))
+    const response = await GET(adminRequest('http://localhost/api/stats?type=feedback'))
     const body = await response.json()
 
     expect(body.statistics.recentFeedback).toEqual([
@@ -135,5 +142,23 @@ describe('/api/stats contract', () => {
       },
     ])
     expect(body.statistics.positiveRate).toBe(50)
+  })
+
+  it('returns sanitized health status without internal failure details', async () => {
+    ;(db.$queryRaw as jest.Mock).mockRejectedValueOnce(new Error('database unavailable'))
+
+    const response = await GET(adminRequest('http://localhost/api/stats?type=health'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.health.status).toBe('degraded')
+    expect(body.health.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'database',
+        status: 'error',
+      }),
+    ]))
+    expect(body.health.environment).toBeUndefined()
+    expect(body.health.services[0].message).toBeUndefined()
   })
 })

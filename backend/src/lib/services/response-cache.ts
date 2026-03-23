@@ -3,7 +3,7 @@
 // Phase 4: Intelligent Response Caching Layer
 // =====================================================
 
-import { ChatResponse, SourceReference } from '@/types'
+import { ChatResponse } from '@/types'
 
 // ==================== Types ====================
 

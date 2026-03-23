@@ -96,7 +96,7 @@ export class EnhancedRAGService {
     const startTime = Date.now()
     let retrievalTime = 0
     let generationTime = 0
-    let cachedResponse = false
+    const cachedResponse = false
 
     try {
       await this.initialize()
@@ -175,7 +175,7 @@ export class EnhancedRAGService {
       const sources = await this.formatEnhancedSources(retrievalResult.chunks, retrievalResult.scores)
 
       // Step 7: Save to session
-      let sessionId = request.sessionId
+      const sessionId = request.sessionId
       let messageId: string | undefined
 
       if (sessionId) {

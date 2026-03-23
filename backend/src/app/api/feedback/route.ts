@@ -5,10 +5,19 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { authenticateToken } from '@/middleware/auth'
+import { getRouteAuthContext } from '@/lib/route-middleware'
 import { feedbackSchema, validateOrThrow, ValidationError } from '@/lib/validators'
+
+function canAccessOwnedSession(ownerId: string | null | undefined, userId: string, role: string) {
+  return role === 'admin' || ownerId === userId
+}
 
 // Submit feedback
 export async function POST(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
+  if (authError || !user) return authError
+
   try {
     const body = await request.json()
     
@@ -17,7 +26,14 @@ export async function POST(request: NextRequest) {
     
     // Check if message exists
     const message = await db.chatMessage.findUnique({
-      where: { id: validatedInput.messageId }
+      where: { id: validatedInput.messageId },
+      include: {
+        session: {
+          select: {
+            userId: true,
+          },
+        },
+      },
     })
     
     if (!message) {
@@ -26,11 +42,19 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       )
     }
+
+    if (!canAccessOwnedSession(message.session.userId, user.userId, user.role)) {
+      return NextResponse.json(
+        { success: false, error: 'You do not have access to this message' },
+        { status: 403 }
+      )
+    }
     
     // Create feedback
     const feedback = await db.feedback.create({
       data: {
         messageId: validatedInput.messageId,
+        userId: user.userId,
         rating: validatedInput.rating,
         comment: validatedInput.comment,
       }
@@ -64,6 +88,9 @@ export async function POST(request: NextRequest) {
 
 // Get feedback statistics
 export async function GET(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
+  if (authError || !user) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const messageId = searchParams.get('messageId')
@@ -72,7 +99,18 @@ export async function GET(request: NextRequest) {
       // Get feedback for specific message
       const feedback = await db.feedback.findFirst({
         where: { messageId },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
+        include: {
+          message: {
+            include: {
+              session: {
+                select: {
+                  userId: true,
+                },
+              },
+            },
+          },
+        },
       })
 
       if (!feedback) {
@@ -81,16 +119,36 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         )
       }
+
+      if (!canAccessOwnedSession(feedback.message.session.userId, user.userId, user.role)) {
+        return NextResponse.json(
+          { success: false, error: 'You do not have access to this feedback' },
+          { status: 403 }
+        )
+      }
       
       return NextResponse.json({
         success: true,
-        feedback,
+        feedback: {
+          id: feedback.id,
+          messageId: feedback.messageId,
+          userId: feedback.userId,
+          rating: feedback.rating,
+          comment: feedback.comment,
+          createdAt: feedback.createdAt,
+        },
         timestamp: new Date()
       })
     }
     
     // Get overall feedback statistics
-    const allFeedback = await db.feedback.findMany()
+    const allFeedback = await db.feedback.findMany({
+      where: user.role === 'admin'
+        ? undefined
+        : {
+            userId: user.userId,
+          },
+    })
     
     const avgRating = allFeedback.length > 0
       ? allFeedback.reduce((sum, f) => sum + f.rating, 0) / allFeedback.length

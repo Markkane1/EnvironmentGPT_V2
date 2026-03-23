@@ -12,7 +12,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
@@ -63,6 +62,21 @@ interface DataConnector {
   hasApiKey: boolean
 }
 
+interface ConnectorStats {
+  totalConnectors: number
+  activeConnectors: number
+  connectorsByType: Record<string, number>
+  totalRequests: number
+  totalErrors: number
+}
+
+interface ConnectorTestResult {
+  success: boolean
+  data?: unknown
+  error?: string
+  latencyMs?: number
+}
+
 const CONNECTOR_TYPES = [
   { value: 'aqi', label: 'Air Quality Index (AQI)', icon: Wind },
   { value: 'weather', label: 'Weather Data', icon: Cloud },
@@ -89,11 +103,11 @@ const TOPIC_OPTIONS = [
 export function ConnectorsSettingsPanel() {
   const [connectors, setConnectors] = useState<DataConnector[]>([])
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<any>(null)
+  const [stats, setStats] = useState<ConnectorStats | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConnector, setEditingConnector] = useState<DataConnector | null>(null)
   const [testingConnector, setTestingConnector] = useState<string | null>(null)
-  const [testResult, setTestResult] = useState<any>(null)
+  const [testResult, setTestResult] = useState<ConnectorTestResult | null>(null)
 
   // Form state
   const [formData, setFormData] = useState({

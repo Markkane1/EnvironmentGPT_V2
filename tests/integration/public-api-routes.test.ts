@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { chatService } from '@/lib/services/chat-service'
 import { responseCacheService } from '@/lib/services/response-cache'
 import { queryProcessorService } from '@/lib/services/query-processor'
+import { createAuthHeaders } from '../helpers/auth'
 import {
   GET as getUsers,
   PATCH as patchUsers,
@@ -54,7 +55,7 @@ jest.mock('@/lib/services/chat-service', () => ({
   chatService: {
     getRecentSessions: jest.fn(),
     getSession: jest.fn(),
-    createSession: jest.fn(),
+    createOwnedSession: jest.fn(),
     deleteSession: jest.fn(),
   },
 }))
@@ -98,6 +99,23 @@ function jsonRequest(url: string, body?: unknown, method = 'POST'): Request {
   return new Request(url, init)
 }
 
+function authenticatedRequest(
+  url: string,
+  init: RequestInit = {},
+  role: 'admin' | 'viewer' = 'viewer'
+): Request {
+  const headers = new Headers(init.headers)
+
+  for (const [key, value] of Object.entries(createAuthHeaders(role, `${role}-user`))) {
+    headers.set(key, value)
+  }
+
+  return new Request(url, {
+    ...init,
+    headers,
+  })
+}
+
 describe('Public API routes', () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -121,7 +139,7 @@ describe('Public API routes', () => {
         },
       ] as never)
 
-      const response = await getUsers(new Request('http://localhost/api/users'))
+      const response = await getUsers(authenticatedRequest('http://localhost/api/users', {}, 'admin'))
       const payload = await response.json()
 
       expect(response.status).toBe(200)
@@ -136,9 +154,13 @@ describe('Public API routes', () => {
     it('returns 404 when patching a missing user', async () => {
       mockDb.user.update.mockRejectedValue(Object.assign(new Error('Not found'), { code: 'P2025' }))
 
-      const response = await patchUsers(jsonRequest('http://localhost/api/users?id=user-1', {
-        name: 'Updated Name',
-      }))
+      const response = await patchUsers(authenticatedRequest('http://localhost/api/users?id=user-1', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Updated Name',
+        }),
+      }, 'admin'))
       const payload = await response.json()
 
       expect(response.status).toBe(404)
@@ -148,9 +170,9 @@ describe('Public API routes', () => {
     it('returns 404 when deleting a missing user', async () => {
       mockDb.user.update.mockRejectedValue(Object.assign(new Error('Not found'), { code: 'P2025' }))
 
-      const response = await deleteUsers(new Request('http://localhost/api/users?id=user-1', {
+      const response = await deleteUsers(authenticatedRequest('http://localhost/api/users?id=user-1', {
         method: 'DELETE',
-      }))
+      }, 'admin'))
       const payload = await response.json()
 
       expect(response.status).toBe(404)
@@ -164,18 +186,22 @@ describe('Public API routes', () => {
         { id: 'session-1', title: 'First session' },
       ] as never)
 
-      const response = await getSessions(new Request('http://localhost/api/sessions?limit=abc'))
+      const response = await getSessions(authenticatedRequest('http://localhost/api/sessions?limit=abc'))
       const payload = await response.json()
 
       expect(response.status).toBe(200)
-      expect(mockChatService.getRecentSessions).toHaveBeenCalledWith(10)
+      expect(mockChatService.getRecentSessions).toHaveBeenCalledWith(10, 'viewer-user')
       expect(payload.sessions).toHaveLength(1)
     })
 
     it('returns 404 when deleting a missing session', async () => {
+      mockChatService.getSession.mockResolvedValue({
+        id: 'session-1',
+        userId: 'viewer-user',
+      } as never)
       mockChatService.deleteSession.mockResolvedValue(false)
 
-      const response = await deleteSessions(new Request('http://localhost/api/sessions?id=session-1', {
+      const response = await deleteSessions(authenticatedRequest('http://localhost/api/sessions?id=session-1', {
         method: 'DELETE',
       }))
       const payload = await response.json()
@@ -185,38 +211,69 @@ describe('Public API routes', () => {
     })
 
     it('creates a session through the chat service', async () => {
-      mockChatService.createSession.mockResolvedValue({
+      mockChatService.createOwnedSession.mockResolvedValue({
         id: 'session-new',
         title: 'New session',
+        userId: 'viewer-user',
       } as never)
 
-      const response = await postSessions(jsonRequest('http://localhost/api/sessions', {
-        title: 'New session',
-        documentId: 'doc-1',
+      const response = await postSessions(authenticatedRequest('http://localhost/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'New session',
+          documentId: 'doc-1',
+        }),
       }))
       const payload = await response.json()
 
       expect(response.status).toBe(201)
-      expect(mockChatService.createSession).toHaveBeenCalledWith('New session', 'doc-1')
+      expect(mockChatService.createOwnedSession).toHaveBeenCalledWith('viewer-user', 'New session', 'doc-1')
       expect(payload.session.id).toBe('session-new')
+    })
+
+    it('returns 403 when deleting another user session', async () => {
+      mockChatService.getSession.mockResolvedValue({
+        id: 'session-1',
+        userId: 'other-user',
+      } as never)
+
+      const response = await deleteSessions(authenticatedRequest('http://localhost/api/sessions?id=session-1', {
+        method: 'DELETE',
+      }))
+      const payload = await response.json()
+
+      expect(response.status).toBe(403)
+      expect(payload.error).toBe('You do not have access to this session')
+      expect(mockChatService.deleteSession).not.toHaveBeenCalled()
     })
   })
 
   describe('feedback route', () => {
     it('creates feedback after validating the message exists', async () => {
-      mockDb.chatMessage.findUnique.mockResolvedValue({ id: 'msg-1' } as never)
+      mockDb.chatMessage.findUnique.mockResolvedValue({
+        id: 'msg-1',
+        session: {
+          userId: 'viewer-user',
+        },
+      } as never)
       mockDb.feedback.create.mockResolvedValue({
         id: 'feedback-1',
         messageId: 'msg-1',
+        userId: 'viewer-user',
         rating: 5,
         comment: 'Helpful',
         createdAt: new Date('2025-01-01T00:00:00.000Z'),
       } as never)
 
-      const response = await postFeedback(jsonRequest('http://localhost/api/feedback', {
-        messageId: 'msg-1',
-        rating: 5,
-        comment: 'Helpful',
+      const response = await postFeedback(authenticatedRequest('http://localhost/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messageId: 'msg-1',
+          rating: 5,
+          comment: 'Helpful',
+        }),
       }))
       const payload = await response.json()
 
@@ -225,6 +282,7 @@ describe('Public API routes', () => {
       expect(mockDb.feedback.create).toHaveBeenCalledWith({
         data: {
           messageId: 'msg-1',
+          userId: 'viewer-user',
           rating: 5,
           comment: 'Helpful',
         },
@@ -234,7 +292,9 @@ describe('Public API routes', () => {
     it('returns 404 when requesting feedback for a message with no feedback', async () => {
       mockDb.feedback.findFirst.mockResolvedValue(null)
 
-      const response = await getFeedback(new Request('http://localhost/api/feedback?messageId=msg-1'))
+      const response = await getFeedback(authenticatedRequest('http://localhost/api/feedback?messageId=msg-1', {
+        method: 'GET',
+      }))
       const payload = await response.json()
 
       expect(response.status).toBe(404)
@@ -246,14 +306,18 @@ describe('Public API routes', () => {
     it('invalidates by structured pattern', async () => {
       mockResponseCacheService.invalidatePattern.mockReturnValue(3)
 
-      const response = await postCache(jsonRequest('http://localhost/api/cache', {
-        action: 'invalidate',
-        params: {
-          pattern: {
-            query: 'air quality',
+      const response = await postCache(authenticatedRequest('http://localhost/api/cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'invalidate',
+          params: {
+            pattern: {
+              query: 'air quality',
+            },
           },
-        },
-      }))
+        }),
+      }, 'admin'))
       const payload = await response.json()
 
       expect(response.status).toBe(200)
@@ -264,12 +328,16 @@ describe('Public API routes', () => {
     })
 
     it('rejects empty invalidation patterns', async () => {
-      const response = await postCache(jsonRequest('http://localhost/api/cache', {
-        action: 'invalidate',
-        params: {
-          pattern: {},
-        },
-      }))
+      const response = await postCache(authenticatedRequest('http://localhost/api/cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'invalidate',
+          params: {
+            pattern: {},
+          },
+        }),
+      }, 'admin'))
       const payload = await response.json()
 
       expect(response.status).toBe(400)
@@ -308,8 +376,12 @@ describe('Public API routes', () => {
         inScope: true,
       })
 
-      const response = await postQuery(jsonRequest('http://localhost/api/query', {
-        query: 'What is the air quality in Lahore?',
+      const response = await postQuery(authenticatedRequest('http://localhost/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: 'What is the air quality in Lahore?',
+        }),
       }))
       const payload = await response.json()
 

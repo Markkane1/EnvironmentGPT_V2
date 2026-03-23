@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { responseCacheService } from '@/lib/services/response-cache'
+import { authenticateToken, requireAdmin } from '@/middleware/auth'
+import { runRouteMiddleware } from '@/lib/route-middleware'
 import { z } from 'zod'
 
 const cacheActionSchema = z.object({
@@ -18,10 +20,13 @@ const cacheActionSchema = z.object({
     maxAgeMs: z.number().int().positive().optional(),
     enabled: z.boolean().optional(),
   }).partial().optional(),
-})
+}).strict()
 
 // Get cache statistics
 export async function GET(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const stats = responseCacheService.getStats()
     const popularQueries = responseCacheService.getPopularQueries(10)
@@ -53,6 +58,9 @@ export async function GET(request: NextRequest) {
 
 // Manage cache
 export async function POST(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const body = await request.json()
     const parsed = cacheActionSchema.safeParse(body)

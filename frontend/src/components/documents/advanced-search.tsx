@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,6 +41,8 @@ interface AdvancedSearchProps {
   placeholder?: string
 }
 
+type DebouncedSearch = (searchQuery: string, searchFilters: SearchFilters) => void
+
 export function AdvancedSearch({ onDocumentSelect, placeholder }: AdvancedSearchProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Document[]>([])
@@ -62,15 +64,14 @@ export function AdvancedSearch({ onDocumentSelect, placeholder }: AdvancedSearch
     if (saved) {
       try {
         setSearchHistory(JSON.parse(saved).slice(0, 10))
-      } catch (e) {
+      } catch {
         console.error('Failed to load search history')
       }
     }
   }, [])
 
   // Debounced search function
-  const performSearch = useCallback(
-    debounce(async (searchQuery: string, searchFilters: SearchFilters) => {
+  const performSearchFn = useCallback(async (searchQuery: string, searchFilters: SearchFilters) => {
       if (!searchQuery.trim() && searchFilters.category === 'all') {
         setResults([])
         setTotalResults(0)
@@ -99,8 +100,11 @@ export function AdvancedSearch({ onDocumentSelect, placeholder }: AdvancedSearch
       } finally {
         setIsLoading(false)
       }
-    }, 300),
-    []
+    }, [])
+
+  const performSearch = useMemo<DebouncedSearch>(
+    () => debounce(performSearchFn, 300) as DebouncedSearch,
+    [performSearchFn]
   )
 
   // Trigger search when query or filters change

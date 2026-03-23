@@ -6,8 +6,11 @@ const globalForPrisma = globalThis as unknown as {
 
 export const db =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
-  })
+  (process.env.NODE_ENV === 'production'
+    // Disable query logging in production to avoid leaking SQL statements and request data.
+    ? new PrismaClient()
+    : new PrismaClient({
+        log: ['warn', 'error'],
+      }))
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

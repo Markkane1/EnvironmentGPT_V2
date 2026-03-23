@@ -16,6 +16,7 @@ htmlcov/
 .vscode/
 .idea/
 *.swp
+.claude/
 
 tests/playwright-results.json
 jest-results.json
@@ -27,7 +28,11 @@ audit-results.json
 zap-report.html
 *.tmp
 
-backend/prisma/e2e.db
+# SQLite database files (dev artifacts - never commit)
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/prisma/*.db-shm
+backend/prisma/*.db-wal
 
 # Monorepo workspace build artifacts
 frontend/.next/
@@ -44,6 +49,10 @@ tsconfig.verify.tsbuildinfo
 .env.development.local
 .env.test.local
 .env.production.local
+*.db
+*.sqlite
+*.sqlite3
+backend/.env
 
 .DS_Store
 Thumbs.db

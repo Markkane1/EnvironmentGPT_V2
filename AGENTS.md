@@ -4,8 +4,8 @@
 
 ## Stack
 - Language: TypeScript primary, with a few Python and shell utility scripts
-- Frontend: Next.js App Router with React
-- Backend: Next.js Route Handlers under `src/app/api`
+- Frontend: Next.js App Router with React in `frontend/`
+- Backend: Next.js Route Handlers in `backend/src/app/api`
 - Database: PostgreSQL with Prisma
 - Auth: none detected in active runtime code
 - Package manager: npm
@@ -15,12 +15,17 @@
 EnvironmentGPT is an EPA Punjab knowledge assistant. It ingests PDF, Word, Markdown, and text documents into a PostgreSQL-backed knowledge base, uses retrieval plus provider-managed LLM routing to answer chat queries, and exposes admin screens for document, provider, connector, cache, and health management.
 
 ## Folder Structure
-- `src/`
-  - `app/` Next.js pages and API route handlers
-  - `components/` feature and UI components
-  - `hooks/` React hooks
-  - `lib/` services, validators, utilities, state, monitoring, constants
-  - `types/` shared TypeScript contracts
+- `frontend/`
+  - `src/app/` frontend pages and layouts
+  - `src/components/` feature and UI components
+  - `src/hooks/` React hooks
+  - `src/lib/` frontend state, constants, helpers, and utilities
+  - `src/types/` shared frontend-facing contracts
+- `backend/`
+  - `src/app/api/` backend route handlers
+  - `src/lib/` services, validators, utilities, monitoring, security, and DB access
+  - `src/types/` backend-facing contracts
+  - `prisma/` Prisma schema and local DB artifacts
 - `tests/`
   - `unit/`
   - `integration/`
@@ -33,18 +38,16 @@ EnvironmentGPT is an EPA Punjab knowledge assistant. It ingests PDF, Word, Markd
 - `docs/` documentation and audit reports
 - `infra/` deployment, proxy, monitoring, and Kubernetes assets
 - `scripts/` local/dev/deploy/bootstrap utilities
-- `prisma/` Prisma schema and local DB artifacts only
-- `public/` static assets
 
 ## File Placement Rules
-- Application source -> `src/`
+- Application source -> `frontend/src/` or `backend/src/`
 - Tests -> `tests/[unit|integration|components|e2e|security]`
 - Test support files -> `tests/helpers` and `tests/fixtures`
 - Test runner config -> `tests/config/`
 - Documentation -> `docs/`
 - Infrastructure manifests and proxy config -> `infra/`
 - Utility scripts -> `scripts/`
-- Config files -> project root
+- Config files -> project root, `frontend/`, or `backend/` only when they are workspace-local configs
 - Never create `.md` report files in root except `README.md` and `AGENTS.md`
 - Never leave temp, draft, backup, or debug files in the repo
 
@@ -68,14 +71,14 @@ EnvironmentGPT is an EPA Punjab knowledge assistant. It ingests PDF, Word, Markd
 
 ## Session Rules
 - Read `AGENTS.md` before starting every session
-- Preserve the Next.js `src/` layout; do not force a separate `client/server` split
+- Preserve the Next.js workspace split; do not collapse `frontend/` and `backend/`
 - Run the full test suite at the end of every session
 - Update `docs/PROJECT_STRUCTURE.md` if the folder structure changes
 
 ## Follow-up Actions Needed
-- Decide whether `src/components/admin/dashboard.tsx` should remain alongside `src/components/admin/enhanced-dashboard.tsx`
-- Decide whether `src/components/chat/chat-interface.tsx` should remain alongside `src/components/chat/enhanced-chat-interface.tsx`
+- Decide whether `frontend/src/components/admin/dashboard.tsx` should remain alongside `frontend/src/components/admin/enhanced-dashboard.tsx`
+- Decide whether `frontend/src/components/chat/chat-interface.tsx` should remain alongside `frontend/src/components/chat/enhanced-chat-interface.tsx`
 - Decide whether the `advanced-*` and non-advanced RAG/embedding services are both intentional public surfaces
-- Decide whether `prisma/dev.db` and `prisma/push-created.db` are fixtures that should stay or local artifacts that should be removed
+- Decide whether `backend/prisma/dev.db` and `backend/prisma/push-created.db` are fixtures that should stay or local artifacts that should be removed
 - Decide whether the admin surface is intentionally unauthenticated or whether an auth layer should be added
-- Add a real Git repository or work inside the original repo before any large future restructures
+- Put the project back inside a real Git repository before any future broad refactor

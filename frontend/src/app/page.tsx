@@ -1,14 +1,52 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Sidebar } from '@/components/chat/sidebar'
 import { EnhancedChatInterface } from '@/components/chat/enhanced-chat-interface'
 import { useChatStore } from '@/lib/store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Menu, Leaf, ExternalLink } from 'lucide-react'
+import { Menu, ExternalLink } from 'lucide-react'
 
 export default function Home() {
   const { toggleSidebar, sidebarOpen } = useChatStore()
+  const [showAdminLink, setShowAdminLink] = useState(false)
+
+  useEffect(() => {
+    let active = true
+
+    async function loadSession() {
+      try {
+        const response = await fetch('/api/auth/session', {
+          method: 'GET',
+          cache: 'no-store',
+        })
+
+        if (!response.ok) {
+          if (active) {
+            setShowAdminLink(false)
+          }
+          return
+        }
+
+        const payload = await response.json()
+
+        if (active) {
+          setShowAdminLink(payload.authenticated === true && payload.role === 'admin')
+        }
+      } catch {
+        if (active) {
+          setShowAdminLink(false)
+        }
+      }
+    }
+
+    void loadSession()
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   return (
     <div className="flex h-screen bg-white">
@@ -54,11 +92,13 @@ export default function Home() {
                   EPA Punjab
                 </a>
               </Button>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/admin" className="gap-1">
-                  Admin
-                </a>
-              </Button>
+              {showAdminLink ? (
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/admin" className="gap-1">
+                    Admin
+                  </a>
+                </Button>
+              ) : null}
             </div>
           </div>
         </header>

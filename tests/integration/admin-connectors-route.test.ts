@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { createAuthHeaders } from '../helpers/auth'
 
 jest.mock('@/lib/db', () => ({
   db: {
@@ -60,7 +61,9 @@ describe('/api/admin/connectors?action=test', () => {
     })
 
     const response = await GET(
-      new NextRequest('http://localhost/api/admin/connectors?action=test&id=connector-1')
+      new NextRequest('http://localhost/api/admin/connectors?action=test&id=connector-1', {
+        headers: createAuthHeaders('admin', 'admin-user'),
+      })
     )
     const body = await response.json()
 

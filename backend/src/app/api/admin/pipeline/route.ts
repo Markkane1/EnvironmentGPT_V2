@@ -5,6 +5,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { llmRouter } from '@/lib/services/llm-router-service'
+import { authenticateToken, requireAdmin } from '@/middleware/auth'
+import { runRouteMiddleware } from '@/lib/route-middleware'
+import { withRateLimit } from '@/lib/security/rate-limiter'
 import { z } from 'zod'
 
 const pipelineQuerySchema = z.object({
@@ -20,7 +23,10 @@ const pipelineQuerySchema = z.object({
 })
 
 // GET /api/admin/pipeline - Get pipeline statistics and health
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const action = searchParams.get('action')
@@ -43,7 +49,10 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/pipeline - Execute query through pipeline
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const body = await request.json()
     const parsed = pipelineQuerySchema.safeParse(body)
@@ -73,3 +82,7 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
+
+export const GET = withRateLimit((request) => handleGet(request as NextRequest), 'admin')
+export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'admin')

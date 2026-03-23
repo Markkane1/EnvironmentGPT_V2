@@ -5,14 +5,12 @@
 
 import { db } from '@/lib/db'
 import { 
-  ChatMessage, 
   ChatSession, 
   ChatRequest, 
   ChatResponse,
   SourceReference,
   MessageRole 
 } from '@/types'
-import { embeddingService } from './embedding-service'
 import { vectorStoreService } from './vector-store-service'
 import ZAI from 'z-ai-web-dev-sdk'
 
@@ -32,8 +30,6 @@ export class ChatService {
    * Process a chat message and return AI response with RAG
    */
   async processMessage(request: ChatRequest): Promise<ChatResponse> {
-    const startTime = Date.now()
-    
     try {
       await this.initialize()
       
@@ -57,7 +53,7 @@ export class ChatService {
         ? searchResults.map(result => 
             `[${result.metadata.title}${result.metadata.category ? ` - ${result.metadata.category}` : ''}]\n${result.content}`
           ).join('\n\n---\n\n')
-        : await this.getFallbackContext(request.message)
+        : await this.getFallbackContext()
 
       // Build the system prompt based on audience
       const systemPrompt = this.buildSystemPrompt(request.audience || 'General Public', context)
@@ -88,8 +84,6 @@ export class ChatService {
         sources
       )
 
-      const responseTime = Date.now() - startTime
-
       return {
         success: true,
         response: assistantResponse,
@@ -113,8 +107,13 @@ export class ChatService {
    * Create a new chat session
    */
   async createSession(title?: string, documentId?: string): Promise<ChatSession> {
+    return this.createOwnedSession(undefined, title, documentId)
+  }
+
+  async createOwnedSession(userId?: string, title?: string, documentId?: string): Promise<ChatSession> {
     const session = await db.chatSession.create({
       data: {
+        userId,
         title: title || 'New Chat',
         documentId,
       }
@@ -123,6 +122,7 @@ export class ChatService {
     return {
       id: session.id,
       title: session.title || undefined,
+      userId: session.userId || undefined,
       documentId: session.documentId || undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
@@ -151,6 +151,7 @@ export class ChatService {
     return {
       id: session.id,
       title: session.title || undefined,
+      userId: session.userId || undefined,
       documentId: session.documentId || undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
@@ -171,8 +172,9 @@ export class ChatService {
   /**
    * Get recent sessions
    */
-  async getRecentSessions(limit: number = 10): Promise<ChatSession[]> {
+  async getRecentSessions(limit: number = 10, userId?: string): Promise<ChatSession[]> {
     const sessions = await db.chatSession.findMany({
+      where: userId ? { userId } : undefined,
       take: limit,
       orderBy: { updatedAt: 'desc' },
       include: {
@@ -186,6 +188,7 @@ export class ChatService {
     return sessions.map(session => ({
       id: session.id,
       title: session.title || 'Untitled Chat',
+      userId: session.userId || undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: [],
@@ -254,7 +257,7 @@ Important guidelines:
   /**
    * Get fallback context when vector search returns no results
    */
-  private async getFallbackContext(query: string): Promise<string> {
+  private async getFallbackContext(): Promise<string> {
     // Use simple keyword matching as fallback
     const documents = await db.document.findMany({
       where: { isActive: true },

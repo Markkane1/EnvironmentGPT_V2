@@ -6,14 +6,17 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { authenticateToken } from '@/middleware/auth'
+import { withRateLimit } from '@/lib/security/rate-limiter'
 import { advancedEmbeddingService } from '@/lib/services/advanced-embedding-service'
 import { queryProcessorService } from '@/lib/services/query-processor'
 import { responseCacheService } from '@/lib/services/response-cache'
 import { conversationMemoryService } from '@/lib/services/conversation-memory'
 import { llmRouter } from '@/lib/services/llm-router-service'
 import { llmProviderRegistry } from '@/lib/services/llm-provider-registry'
-import { chatMessageSchema, ValidationError, validateOrThrow } from '@/lib/validators'
-import { AUDIENCE_TYPES } from '@/lib/constants'
+import { chatMessageSchema, createValidationErrorResponse } from '@/lib/validators'
+import type { ChatResponse } from '@/types'
+import { getRouteAuthContext } from '@/lib/route-middleware'
 
 // Knowledge base for environmental topics (fallback)
 const ENVIRONMENTAL_KNOWLEDGE = [
@@ -189,8 +192,8 @@ async function retrieveRelevantDocuments(
           content: doc.content.slice(0, 2000) // Limit content size
         }))
       }
-    } catch (error) {
-      console.error('Vector retrieval failed, falling back to keyword search:', error)
+    } catch {
+      console.error('Vector retrieval failed, falling back to keyword search')
     }
   }
   
@@ -285,12 +288,21 @@ ${documentSummaries}
 This response is based on the built-in Punjab environmental knowledge base and any locally indexed documents that matched your query.`
 }
 
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const startTime = Date.now()
-  
+
   try {
     const body = await request.json()
-    const validatedInput = validateOrThrow(chatMessageSchema, body)
+    const parsed = chatMessageSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        createValidationErrorResponse(parsed.error),
+        { status: 400 }
+      )
+    }
+
+    const validatedInput = parsed.data
     
     const { message, audience = 'General Public', sessionId, filters } = validatedInput
     
@@ -325,7 +337,6 @@ export async function POST(request: NextRequest) {
     
     const cachedResponse = responseCacheService.get(cacheKey)
     if (cachedResponse) {
-      console.log('Cache hit for query:', message.slice(0, 50))
       return NextResponse.json({
         ...cachedResponse,
         cached: true,
@@ -340,19 +351,19 @@ export async function POST(request: NextRequest) {
       5
     )
     
-    // Build context from retrieved documents
-    const context = relevantDocs.map(doc => 
-      `[${doc.title}]\n${doc.content}`
-    ).join('\n\n---\n\n')
-    
     // Get conversation history if session exists
     let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
     if (sessionId) {
       const context_data = await conversationMemoryService.getConversationContext(sessionId)
-      conversationHistory = context_data.messages.slice(-10).map(m => ({
-        role: m.role,
-        content: m.content
-      }))
+      conversationHistory = context_data.messages
+        .filter((message): message is typeof message & { role: 'user' | 'assistant' } => (
+          message.role === 'user' || message.role === 'assistant'
+        ))
+        .slice(-10)
+        .map((m) => ({
+          role: m.role,
+          content: m.content
+        }))
     }
     
     // ========================================
@@ -373,35 +384,30 @@ export async function POST(request: NextRequest) {
     
     if (hasConfiguredProviders) {
       // Use dynamic LLM Router with fallback chain
-      console.log('[Chat] Using dynamic LLM Router with provider chain')
-      
       const routerResult = await llmRouter.processQuery({
         query: message,
         sessionId,
         audienceType: audience as 'General Public' | 'Technical' | 'Policy Maker',
-        category: processedQuery.category,
+        category: processedQuery.category ?? undefined,
         conversationHistory
       })
       
       if (!routerResult.success) {
-        console.error('[Chat] LLM Router failed:', routerResult.error)
+        console.error('[Chat] LLM Router failed, using local fallback')
 
         assistantResponse = buildOfflineFallbackResponse(message, relevantDocs, audience)
         providerUsed = 'local-fallback'
         modelUsed = 'knowledge-base'
         latencyMs = Date.now() - startTime
-        fallbackChain = routerResult.fallbackChain
+        fallbackChain = routerResult.fallbackChain ?? undefined
       } else {
         assistantResponse = routerResult.content
         providerUsed = routerResult.providerUsed
         modelUsed = routerResult.modelUsed
         latencyMs = routerResult.latencyMs
-        fallbackChain = routerResult.fallbackChain
-
-        console.log(`[Chat] Response from ${providerUsed} (${modelUsed}) in ${latencyMs}ms`)
+        fallbackChain = routerResult.fallbackChain ?? undefined
       }
     } else {
-      console.log('[Chat] No providers configured, using local fallback response')
       assistantResponse = buildOfflineFallbackResponse(message, relevantDocs, audience)
       providerUsed = 'local-fallback'
       modelUsed = 'knowledge-base'
@@ -418,7 +424,7 @@ export async function POST(request: NextRequest) {
       id: doc.id,
       documentId: doc.id,
       title: doc.title,
-      category: doc.category,
+      category: doc.category || undefined,
       relevanceScore: confidence
     }))
     
@@ -446,7 +452,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify(sources),
       {
         confidence,
-        category: processedQuery.category,
+        category: processedQuery.category ?? undefined,
         intent: processedQuery.intent.type,
         providerUsed,
         modelUsed
@@ -454,13 +460,13 @@ export async function POST(request: NextRequest) {
     )
     
     // Build response
-    const response = {
+    const response: ChatResponse = {
       success: true,
       response: assistantResponse,
       sources,
       sessionId: currentSessionId,
       messageId: assistantMsg?.id,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(),
       confidence,
       metadata: {
         processedQuery: {
@@ -483,19 +489,15 @@ export async function POST(request: NextRequest) {
     responseCacheService.set(cacheKey, response, {
       query: processedQuery.cleaned,
       audience,
-      category: processedQuery.category,
+      category: processedQuery.category ?? undefined,
       documentCount: relevantDocs.length
     })
     
     return NextResponse.json(response)
     
-  } catch (error) {
-    console.error('Chat API error:', error)
-    
-    if (error instanceof ValidationError) {
-      return NextResponse.json(error.toApiResponse(), { status: 400 })
-    }
-    
+  } catch {
+    console.error('Chat API error')
+
     return NextResponse.json(
       { success: false, error: 'Failed to process your request. Please try again.' },
       { status: 500 }
@@ -504,21 +506,15 @@ export async function POST(request: NextRequest) {
 }
 
 // Get session history
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
+  if (authError || !user) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get('sessionId')
     
     if (sessionId) {
-      const context = await conversationMemoryService.getConversationContext(sessionId)
-      
-      if (!context.summary) {
-        return NextResponse.json(
-          { success: false, error: 'Session not found' },
-          { status: 404 }
-        )
-      }
-      
       const session = await db.chatSession.findUnique({
         where: { id: sessionId },
         include: {
@@ -527,13 +523,22 @@ export async function GET(request: NextRequest) {
           }
         }
       })
-      
+
       if (!session) {
         return NextResponse.json(
           { success: false, error: 'Session not found' },
           { status: 404 }
         )
       }
+
+      if (user.role !== 'admin' && session.userId !== user.userId) {
+        return NextResponse.json(
+          { success: false, error: 'You do not have access to this session' },
+          { status: 403 }
+        )
+      }
+
+      const context = await conversationMemoryService.getConversationContext(sessionId)
       
       return NextResponse.json({
         success: true,
@@ -556,7 +561,10 @@ export async function GET(request: NextRequest) {
     }
     
     // Get recent sessions
-    const recentConversations = await conversationMemoryService.getRecentConversations(20)
+    const recentConversations = await conversationMemoryService.getRecentConversations(
+      20,
+      user.role === 'admin' ? undefined : user.userId
+    )
     
     return NextResponse.json({
       success: true,
@@ -569,8 +577,8 @@ export async function GET(request: NextRequest) {
         messageCount: conv.messageCount
       }))
     })
-  } catch (error) {
-    console.error('Session API error:', error)
+  } catch {
+    console.error('Session API error')
     return NextResponse.json(
       { success: false, error: 'Failed to retrieve sessions' },
       { status: 500 }
@@ -579,7 +587,10 @@ export async function GET(request: NextRequest) {
 }
 
 // Delete session
-export async function DELETE(request: NextRequest) {
+async function handleDelete(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
+  if (authError || !user) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get('id')
@@ -591,6 +602,25 @@ export async function DELETE(request: NextRequest) {
       )
     }
     
+    const session = await db.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, userId: true }
+    })
+
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: 'Session not found' },
+        { status: 404 }
+      )
+    }
+
+    if (user.role !== 'admin' && session.userId !== user.userId) {
+      return NextResponse.json(
+        { success: false, error: 'You do not have access to this session' },
+        { status: 403 }
+      )
+    }
+
     const deleted = await conversationMemoryService.deleteConversation(sessionId)
     
     if (!deleted) {
@@ -601,11 +631,16 @@ export async function DELETE(request: NextRequest) {
     }
     
     return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('Delete session error:', error)
+  } catch {
+    console.error('Delete session error')
     return NextResponse.json(
       { success: false, error: 'Failed to delete session' },
       { status: 500 }
     )
   }
 }
+
+
+export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'chat')
+export const GET = withRateLimit((request) => handleGet(request as NextRequest), 'chat')
+export const DELETE = withRateLimit((request) => handleDelete(request as NextRequest), 'chat')

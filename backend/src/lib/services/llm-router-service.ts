@@ -4,7 +4,7 @@
 // Combines Provider Registry + Data Connector Layer
 // =====================================================
 
-import { llmProviderRegistry, ChatCompletionRequest, LLMRequestResult } from './llm-provider-registry'
+import { llmProviderRegistry, ChatCompletionRequest } from './llm-provider-registry'
 import { dataConnectorService, EnrichedContext, ConnectorType } from './data-connector-service'
 import { db } from '@/lib/db'
 
@@ -455,14 +455,10 @@ Focus on environmental policy in Punjab, including:
    */
   async healthCheck(): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy'
-    providers: Record<string, string>
+    providers: Record<string, { healthy: boolean; latencyMs: number | null; error?: string }>
     connectors: Record<string, string>
   }> {
     const providerHealth = await llmProviderRegistry.healthCheckAll()
-    const providers = Object.fromEntries(
-      Object.entries(providerHealth).map(([k, v]) => [k, v])
-    )
-
     const connectors = await dataConnectorService.getConnectors()
     const connectorHealth: Record<string, string> = {}
 
@@ -472,7 +468,7 @@ Focus on environmental policy in Punjab, including:
     }
 
     // Determine overall status
-    const healthyProviders = Object.values(providerHealth).filter(s => s === 'healthy').length
+    const healthyProviders = Object.values(providerHealth).filter(status => status.healthy).length
     const totalProviders = Object.keys(providerHealth).length
 
     let status: 'healthy' | 'degraded' | 'unhealthy'
@@ -484,7 +480,7 @@ Focus on environmental policy in Punjab, including:
       status = 'healthy'
     }
 
-    return { status, providers, connectors: connectorHealth }
+    return { status, providers: providerHealth, connectors: connectorHealth }
   }
 
   /**

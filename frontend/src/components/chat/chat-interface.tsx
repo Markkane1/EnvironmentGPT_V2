@@ -97,7 +97,7 @@ export function ChatInterface() {
           variant: 'destructive'
         })
       }
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to connect to the server',
@@ -171,7 +171,7 @@ export function ChatInterface() {
           backendMessageId: data.messageId
         })
       }
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to regenerate response',

@@ -42,7 +42,7 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       // Initial State
       messages: [],
       isLoading: false,

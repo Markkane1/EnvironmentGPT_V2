@@ -10,7 +10,6 @@ import {
   ExternalLink, 
   FileText, 
   Calendar,
-  Tag,
   Quote,
   ChevronDown,
   ChevronUp,
@@ -18,7 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { SourceReference } from '@/types'
-import { formatDate, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface SourcePanelProps {
   sources: SourceReference[]
@@ -163,7 +162,7 @@ export function SourcePanel({
                         Excerpt
                       </div>
                       <p className="text-sm text-gray-700 italic">
-                        "{source.excerpt}"
+                        &ldquo;{source.excerpt}&rdquo;
                       </p>
                     </div>
                   )}

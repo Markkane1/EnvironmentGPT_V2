@@ -4,18 +4,32 @@
 // =====================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
+import { authenticateToken, requireAdmin } from '@/middleware/auth'
+import { runRouteMiddleware } from '@/lib/route-middleware'
+import { withRateLimit } from '@/lib/security/rate-limiter'
+import { createValidationErrorResponse } from '@/lib/validators'
 import { z } from 'zod'
 
 // User schema for validation
 const createUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(2).max(100),
+  email: z.string().trim().email().max(320),
+  username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
+  password: z.string().min(8).max(128).optional(),
+  name: z.string().trim().min(2).max(255),
   role: z.enum(['admin', 'analyst', 'viewer', 'guest']).default('viewer'),
-  department: z.string().optional()
-})
+  department: z.string().trim().min(1).max(255).optional()
+}).strict()
 
-const updateUserSchema = createUserSchema.partial()
+const updateUserSchema = z.object({
+  email: z.string().trim().email().max(320).optional(),
+  username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
+  password: z.string().min(8).max(128).optional(),
+  name: z.string().trim().min(2).max(255).optional(),
+  role: z.enum(['admin', 'analyst', 'viewer', 'guest']).optional(),
+  department: z.string().trim().min(1).max(255).optional()
+}).strict()
 
 function isNotFoundError(error: unknown): boolean {
   return typeof error === 'object'
@@ -24,8 +38,29 @@ function isNotFoundError(error: unknown): boolean {
     && (error as { code?: string }).code === 'P2025'
 }
 
+async function buildCreateUserData(validated: z.infer<typeof createUserSchema>) {
+  const { password, ...userData } = validated
+
+  return {
+    ...userData,
+    ...(password ? { passwordHash: await bcrypt.hash(password, 10) } : {}),
+  }
+}
+
+async function buildUpdateUserData(validated: z.infer<typeof updateUserSchema>) {
+  const { password, ...userData } = validated
+
+  return {
+    ...userData,
+    ...(password ? { passwordHash: await bcrypt.hash(password, 10) } : {}),
+  }
+}
+
 // Get all users (admin only)
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const role = searchParams.get('role')
@@ -40,6 +75,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         email: true,
+        username: true,
         name: true,
         role: true,
         department: true,
@@ -60,6 +96,7 @@ export async function GET(request: NextRequest) {
       users: users.map(u => ({
         id: u.id,
         email: u.email,
+        username: u.username,
         name: u.name,
         role: u.role,
         department: u.department,
@@ -79,10 +116,22 @@ export async function GET(request: NextRequest) {
 }
 
 // Create new user (admin only)
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const body = await request.json()
-    const validated = createUserSchema.parse(body)
+    const parsed = createUserSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        createValidationErrorResponse(parsed.error),
+        { status: 400 }
+      )
+    }
+
+    const validated = parsed.data
     
     // Check if user exists
     const existing = await db.user.findUnique({
@@ -95,14 +144,24 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       )
     }
+
+    if (validated.username) {
+      const existingUsername = await db.user.findUnique({
+        where: { username: validated.username }
+      })
+
+      if (existingUsername) {
+        return NextResponse.json(
+          { success: false, error: 'User with this username already exists' },
+          { status: 409 }
+        )
+      }
+    }
+
+    const userData = await buildCreateUserData(validated)
     
     const user = await db.user.create({
-      data: {
-        email: validated.email,
-        name: validated.name,
-        role: validated.role,
-        department: validated.department
-      }
+      data: userData
     })
     
     return NextResponse.json({
@@ -110,6 +169,7 @@ export async function POST(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         name: user.name,
         role: user.role,
         department: user.department,
@@ -118,12 +178,6 @@ export async function POST(request: NextRequest) {
       }
     }, { status: 201 })
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { success: false, error: 'Validation failed', details: error.errors },
-        { status: 400 }
-      )
-    }
     console.error('Create user error:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to create user' },
@@ -133,7 +187,10 @@ export async function POST(request: NextRequest) {
 }
 
 // Update user
-export async function PATCH(request: NextRequest) {
+async function handlePatch(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('id')
@@ -146,11 +203,21 @@ export async function PATCH(request: NextRequest) {
     }
     
     const body = await request.json()
-    const validated = updateUserSchema.parse(body)
+    const parsed = updateUserSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        createValidationErrorResponse(parsed.error),
+        { status: 400 }
+      )
+    }
+
+    const validated = parsed.data
+    const userData = await buildUpdateUserData(validated)
     
     const user = await db.user.update({
       where: { id: userId },
-      data: validated
+      data: userData
     })
     
     return NextResponse.json({
@@ -158,6 +225,7 @@ export async function PATCH(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         name: user.name,
         role: user.role,
         department: user.department,
@@ -181,7 +249,10 @@ export async function PATCH(request: NextRequest) {
 }
 
 // Deactivate user (soft delete)
-export async function DELETE(request: NextRequest) {
+async function handleDelete(request: NextRequest) {
+  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+  if (authError) return authError
+
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('id')
@@ -218,3 +289,9 @@ export async function DELETE(request: NextRequest) {
     )
   }
 }
+
+
+export const GET = withRateLimit((request) => handleGet(request as NextRequest), 'admin')
+export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'admin')
+export const PATCH = withRateLimit((request) => handlePatch(request as NextRequest), 'admin')
+export const DELETE = withRateLimit((request) => handleDelete(request as NextRequest), 'admin')

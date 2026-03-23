@@ -1,17 +1,11 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import type { HealthSnapshot } from '@/lib/monitoring/health'
 import { getHealthSnapshot } from '@/lib/monitoring/health'
-import { responseCacheService } from '@/lib/services/response-cache'
-import { llmProviderRegistry } from '@/lib/services/llm-provider-registry'
+import { requireAdmin } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
-export async function GET() {
-  const [health, cacheStats, providerStats] = await Promise.all([
-    getHealthSnapshot(),
-    Promise.resolve(responseCacheService.getStats()),
-    llmProviderRegistry.getStats(),
-  ])
-
+function buildMetricsBody(health: Pick<HealthSnapshot, 'status' | 'services' | 'uptime'>): string {
   const lines = [
     '# HELP environmentgpt_health_status Overall application health (1 healthy, 0 otherwise)',
     '# TYPE environmentgpt_health_status gauge',
@@ -25,24 +19,35 @@ export async function GET() {
     '# HELP environmentgpt_uptime_seconds Process uptime in seconds',
     '# TYPE environmentgpt_uptime_seconds gauge',
     `environmentgpt_uptime_seconds ${health.uptime}`,
-    '# HELP environmentgpt_cache_entries_total Current cache entry count',
-    '# TYPE environmentgpt_cache_entries_total gauge',
-    `environmentgpt_cache_entries_total ${cacheStats.totalEntries}`,
-    '# HELP environmentgpt_cache_hit_rate Cache hit rate from 0 to 1',
-    '# TYPE environmentgpt_cache_hit_rate gauge',
-    `environmentgpt_cache_hit_rate ${cacheStats.hitRate}`,
-    '# HELP environmentgpt_llm_providers_active Active configured LLM providers',
-    '# TYPE environmentgpt_llm_providers_active gauge',
-    `environmentgpt_llm_providers_active ${providerStats.activeProviders}`,
-    '# HELP environmentgpt_llm_providers_healthy Healthy configured LLM providers',
-    '# TYPE environmentgpt_llm_providers_healthy gauge',
-    `environmentgpt_llm_providers_healthy ${providerStats.healthyProviders}`,
   ]
 
-  return new NextResponse(lines.join('\n') + '\n', {
-    headers: {
-      'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  return lines.join('\n') + '\n'
+}
+
+export async function GET(request: NextRequest) {
+  const authError = requireAdmin(request)
+  if (authError) return authError
+
+  try {
+    const health = await getHealthSnapshot()
+
+    return new NextResponse(buildMetricsBody(health), {
+      headers: {
+        'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch {
+    return new NextResponse(buildMetricsBody({
+      status: 'unhealthy',
+      services: [],
+      uptime: 0,
+    }), {
+      status: 503,
+      headers: {
+        'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    })
+  }
 }
