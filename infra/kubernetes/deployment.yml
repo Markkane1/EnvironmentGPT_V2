@@ -1,0 +1,185 @@
+# =====================================================
+# EPA Punjab EnvironmentGPT - Kubernetes Deployment
+# Phase 9: Deployment & Infrastructure
+# =====================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: environmentgpt
+  labels:
+    app: environmentgpt
+---
+# ==================== ConfigMap ====================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: environmentgpt-config
+  namespace: environmentgpt
+data:
+  NODE_ENV: "production"
+  ENABLE_CACHE: "true"
+  CACHE_TTL: "3600"
+  LOG_LEVEL: "info"
+  OLLAMA_BASE_URL: "http://ollama-service:11434"
+---
+# ==================== Secrets ====================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: environmentgpt-secrets
+  namespace: environmentgpt
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://postgres:change-this-password@postgres.environmentgpt.svc.cluster.local:5432/environmentgpt?schema=public"
+  NEXTAUTH_SECRET: "change-this-in-production"
+  NEXTAUTH_URL: "https://environmentgpt.epa.punjab.gov.pk"
+---
+# ==================== Deployment ====================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: environmentgpt-app
+  namespace: environmentgpt
+  labels:
+    app: environmentgpt
+    component: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: environmentgpt
+      component: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: environmentgpt
+        component: web
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/epa-punjab/environmentgpt:latest
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: environmentgpt-config
+            - secretRef:
+                name: environmentgpt-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: environmentgpt
+                topologyKey: kubernetes.io/hostname
+---
+# ==================== Service ====================
+apiVersion: v1
+kind: Service
+metadata:
+  name: environmentgpt-service
+  namespace: environmentgpt
+spec:
+  selector:
+    app: environmentgpt
+    component: web
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  type: ClusterIP
+---
+# ==================== Ingress ====================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: environmentgpt-ingress
+  namespace: environmentgpt
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - environmentgpt.epa.punjab.gov.pk
+      secretName: environmentgpt-tls
+  rules:
+    - host: environmentgpt.epa.punjab.gov.pk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: environmentgpt-service
+                port:
+                  number: 80
+---
+# ==================== Horizontal Pod Autoscaler ====================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: environmentgpt-hpa
+  namespace: environmentgpt
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: environmentgpt-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---

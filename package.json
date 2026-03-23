@@ -1,0 +1,65 @@
+{
+  "name": "epa-punjab-environmentgpt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EPA Punjab EnvironmentGPT - AI-powered environmental knowledge assistant with vLLM integration",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.cjs",
+    "clean:all": "node scripts/clean.cjs --deps",
+    "dev": "node scripts/dev.cjs",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "lint": "eslint frontend/src backend/src",
+    "test": "jest --config tests/config/jest.config.ts",
+    "test:watch": "jest --config tests/config/jest.config.ts --watch",
+    "test:coverage": "jest --config tests/config/jest.config.ts --coverage",
+    "test:ci": "jest --config tests/config/jest.config.ts --ci --coverage --reporters=default",
+    "test:unit": "jest --config tests/config/jest.backend.config.ts tests/unit",
+    "test:integration": "jest --config tests/config/jest.backend.config.ts tests/integration",
+    "test:components": "jest --config tests/config/jest.frontend.config.ts tests/components",
+    "test:security": "jest --config tests/config/jest.backend.config.ts tests/security",
+    "test:e2e": "playwright test --config tests/config/playwright.config.ts",
+    "db:init": "node scripts/ensure-prisma-db.cjs",
+    "db:push": "npm run db:init && cd backend && prisma db push",
+    "db:generate": "cd backend && prisma generate",
+    "db:migrate": "cd backend && prisma migrate dev",
+    "db:reset": "cd backend && prisma migrate reset",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:setup": "npm run db:init && cd backend && prisma generate && prisma db push && cd .. && tsx scripts/seed.ts",
+    "providers:check": "tsx -e \"import { llmProviderRegistry } from './backend/src/lib/services/llm-provider-registry'; llmProviderRegistry.healthCheckAll().then(console.log)\""
+  },
+  "prisma": {
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "next-auth": "^4.24.11"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "bun-types": "^1.3.4",
+    "cross-fetch": "^4.1.0",
+    "eslint": "^9",
+    "eslint-config-next": "^16.1.1",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "node-mocks-http": "^1.17.2",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}

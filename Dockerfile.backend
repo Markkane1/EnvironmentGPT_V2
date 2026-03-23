@@ -1,0 +1,67 @@
+# =====================================================
+# EPA Punjab EnvironmentGPT - Backend Dockerfile
+# Builds the Next.js API server (port 3001)
+# =====================================================
+
+# Stage 1: Dependencies
+FROM node:20-alpine AS deps
+WORKDIR /app
+RUN apk add --no-cache libc6-compat openssl
+
+COPY package.json package-lock.json* ./
+COPY backend/package.json ./backend/
+COPY frontend/package.json ./frontend/
+COPY backend/prisma ./backend/prisma/
+RUN npm ci --include=dev
+
+RUN npx prisma generate --schema=backend/prisma/schema.prisma
+
+# Stage 2: Builder
+FROM node:20-alpine AS builder
+WORKDIR /app
+RUN apk add --no-cache openssl
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY backend ./backend
+COPY frontend/package.json ./frontend/
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+WORKDIR /app/backend
+RUN node ../node_modules/.bin/next build
+
+# Stage 3: Runner
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+RUN apk add --no-cache openssl curl
+
+COPY --from=builder /app/backend/.next/standalone ./
+COPY --from=builder /app/backend/.next/static ./.next/static
+COPY --from=builder /app/backend/prisma ./prisma
+COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
+
+RUN mkdir -p /app/data /app/logs
+RUN chown -R nextjs:nodejs /app/data /app/logs
+
+COPY scripts/docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
+
+USER nextjs
+
+EXPOSE 3001
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3001/api/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["node", "server.js"]

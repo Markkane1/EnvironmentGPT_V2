@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ROOT=\"c:/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated\")",
+      "Bash(mkdir -p \"$ROOT/frontend/src/app/admin\")",
+      "Bash(mkdir -p \"$ROOT/frontend/src/app/settings\")",
+      "Bash(mkdir -p \"$ROOT/frontend/src/lib/constants\")",
+      "Bash(mkdir -p \"$ROOT/frontend/src/lib/i18n\")",
+      "Bash(__NEW_LINE_6861a86761dbe77b__ echo:*)",
+      "Read(//c/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/$ROOT/**)",
+      "Read(//c/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/$ROOT/frontend/**)",
+      "Read(//c/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/$ROOT/frontend/src/**)",
+      "Bash(__NEW_LINE_04f2b601525bbac5__ echo:*)",
+      "Read(//c/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/$ROOT/backend/**)",
+      "Read(//c/Users/IS/OneDrive/Desktop/EnvironmentGPT/ZZZ/EnvironmentGPT_vLLM_Updated/$ROOT/backend/src/**)"
+    ]
+  }
+}

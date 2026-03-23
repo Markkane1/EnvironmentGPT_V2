@@ -1,0 +1,300 @@
+// =====================================================
+// EPA Punjab EnvironmentGPT - Database Schema
+// Phase 1: Comprehensive Data Model
+// =====================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== User Management ====================
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String
+  role        String   @default("viewer") // admin, analyst, viewer, guest
+  department  String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  chatSessions ChatSession[]
+  feedback     Feedback[]
+}
+
+// ==================== Knowledge Base Documents ====================
+
+model Document {
+  id           String   @id @default(cuid())
+  title        String
+  content      String
+  summary      String?
+  source       String?  // File path or URL
+  sourceUrl    String?  // Original URL if from web
+  category     String?  // Air Quality, Water Resources, etc.
+  reportSeries String?  // GEO Report, IPBES Assessment, etc.
+  year         Int?
+  audience     String   @default("General Public")
+  author       String?
+  tags         String?  // JSON array of tags
+  language     String   @default("en")
+  fileSize     Int?     // in bytes
+  fileType     String?  // pdf, docx, etc.
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  chunks       DocumentChunk[]
+  chatSessions ChatSession[]
+  
+  @@index([category])
+  @@index([year])
+  @@index([isActive])
+}
+
+// ==================== Document Chunks for RAG ====================
+
+model DocumentChunk {
+  id          String   @id @default(cuid())
+  documentId  String
+  content     String
+  chunkIndex  Int
+  embedding   String?  // Vector embedding (JSON or reference)
+  metadata    String?  // JSON with page number, section, etc.
+  createdAt   DateTime @default(now())
+  
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  @@index([documentId])
+  @@index([chunkIndex])
+}
+
+// ==================== Chat Sessions ====================
+
+model ChatSession {
+  id          String   @id @default(cuid())
+  userId      String?
+  documentId  String?
+  title       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user        User?     @relation(fields: [userId], references: [id])
+  document    Document? @relation(fields: [documentId], references: [id])
+  messages    ChatMessage[]
+  
+  @@index([userId])
+  @@index([documentId])
+  @@index([updatedAt])
+}
+
+// ==================== Chat Messages ====================
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // "user", "assistant", or "system"
+  content    String
+  sources   String?  // JSON array of source references
+  metadata  String?  // JSON with response time, tokens, etc.
+  createdAt DateTime @default(now())
+  
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  feedback  Feedback[]
+  
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+// ==================== User Feedback ====================
+
+model Feedback {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String?
+  rating    Int      // 1-5 stars
+  comment   String?
+  createdAt DateTime @default(now())
+  
+  user      User?        @relation(fields: [userId], references: [id])
+  message   ChatMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  
+  @@index([messageId])
+  @@index([rating])
+}
+
+// ==================== System Configuration ====================
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ==================== Analytics Events ====================
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  eventType   String   // query, feedback, document_view, etc.
+  userId      String?
+  sessionId   String?
+  documentId  String?
+  metadata    String?  // JSON with event-specific data
+  createdAt   DateTime @default(now())
+  
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ==================== Audit Log ====================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // create, update, delete
+  entityType  String   // Document, User, etc.
+  entityId    String
+  userId      String?
+  oldData     String?  // JSON
+  newData     String?  // JSON
+  createdAt   DateTime @default(now())
+  
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+}
+
+// ==================== LLM Provider Registry ====================
+// Dynamic LLM provider configuration - supports OpenAI-compatible APIs
+// vLLM, Ollama, OpenAI, DeepSeek, Azure all use /v1/chat/completions
+
+model LLMProvider {
+  id              String   @id @default(cuid())
+  name            String   @unique                      // "OpenAI", "DeepSeek", "Ollama", "vLLM"
+  displayName     String                               // Friendly name for UI
+  providerType    String   @default("openai_compat")   // openai_compat, ollama, azure
+  baseUrl         String                               // https://api.openai.com/v1 or http://ollama:11434/v1
+  apiKeyEnvVar    String?                              // Environment variable name for API key (optional for local)
+  modelId         String                               // gpt-4o, deepseek-chat, qwen3:8b, etc.
+  defaultParams   String?  @default("{}")              // JSON: temperature, max_tokens, etc.
+  role            String   @default("available")       // primary, fallback_1, fallback_2, available
+  priority        Int      @default(100)               // Lower = higher priority for fallbacks
+  isActive        Boolean  @default(true)
+  healthStatus    String   @default("unknown")         // healthy, unhealthy, unknown
+  lastHealthCheck DateTime?
+  requestCount    Int      @default(0)
+  errorCount      Int      @default(0)
+  avgLatencyMs    Float?
+  addedBy         String?                              // User ID who added this provider
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([role])
+  @@index([isActive])
+  @@index([priority])
+}
+
+// ==================== Data Connector Registry ====================
+// Live data sources that enrich RAG context before LLM generation
+// AQI, weather, water quality, complaint databases, etc.
+
+model DataConnector {
+  id                    String   @id @default(cuid())
+  name                  String   @unique                        // "Punjab AQI", "PCRWR Water Quality"
+  displayName           String                                  // Friendly name for UI
+  connectorType         String                                  // aqi, weather, water_quality, custom_api, database
+  endpointUrl           String                                  // API endpoint or connection string
+  apiKeyEnvVar          String?                                 // Environment variable for API key
+  authMethod            String   @default("none")              // none, api_key, bearer, basic, oauth2
+  authHeader            String?                                 // Custom auth header name
+  requestMethod         String   @default("GET")               // GET, POST
+  requestBodyTemplate   String?                                 // JSON template for POST requests
+  responseMapping       String?                                 // JSONPath or JMESPath to extract data
+  injectAs              String   @default("system_context")    // system_context, user_context, post_retrieval
+  injectionTemplate     String?                                 // Handlebars template for context injection
+  isActive              Boolean  @default(true)
+  refreshIntervalSec    Int      @default(300)                 // Cache refresh interval in seconds
+  cacheEnabled          Boolean  @default(true)
+  cacheTtlSec           Int      @default(300)                 // Cache TTL in seconds
+  lastFetchedAt         DateTime?
+  lastFetchStatus       String?                                 // success, error, timeout
+  lastFetchError        String?
+  requestCount          Int      @default(0)
+  errorCount            Int      @default(0)
+  addedBy               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  topicMappings         ConnectorTopicMapping[]
+  
+  @@index([connectorType])
+  @@index([isActive])
+}
+
+// ==================== Connector Topic Mapping ====================
+// Maps connectors to query topics for conditional activation
+// AQI connector only fires for air_quality queries, etc.
+
+model ConnectorTopicMapping {
+  id           String   @id @default(cuid())
+  connectorId  String
+  topic        String                                 // air_quality, water, climate, waste, general, all
+  priority     Int      @default(100)                // Execution order (lower = first)
+  isActive     Boolean  @default(true)
+  conditions   String?  @default("{}")               // JSON conditions for activation
+  
+  connector    DataConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  
+  @@unique([connectorId, topic])
+  @@index([topic])
+  @@index([isActive])
+}
+
+// ==================== Connector Cache ====================
+// Caches live data from connectors to reduce API calls
+
+model ConnectorCache {
+  id           String   @id @default(cuid())
+  connectorId  String
+  cacheKey     String                                  // Unique key for cached data
+  data         String                                  // JSON cached response
+  fetchedAt    DateTime @default(now())
+  expiresAt    DateTime
+  
+  @@unique([connectorId, cacheKey])
+  @@index([connectorId])
+  @@index([expiresAt])
+}
+
+// ==================== LLM Request Log ====================
+// Logs all LLM requests for analytics and debugging
+
+model LLMRequestLog {
+  id              String   @id @default(cuid())
+  providerId      String?
+  sessionId       String?
+  messageId       String?
+  query           String?                              // Original query (truncated)
+  modelUsed       String?                              // Model that was used
+  requestTokens   Int?
+  responseTokens  Int?
+  latencyMs       Int?
+  status          String                                // success, error, timeout, fallback
+  errorMessage    String?
+  fallbackFrom    String?                              // Original provider if fallback occurred
+  fallbackTo      String?                              // Fallback provider used
+  createdAt       DateTime @default(now())
+  
+  @@index([providerId])
+  @@index([sessionId])
+  @@index([status])
+  @@index([createdAt])
+}
