@@ -1,61 +1,104 @@
 // =====================================================
 // EPA Punjab EnvironmentGPT - LLM Providers API
-// Admin endpoints for managing LLM providers
+// Admin endpoints for managing provider-registry entries
 // =====================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { llmProviderRegistry } from '@/lib/services/llm-provider-registry'
+import { z } from 'zod'
+import { llmProviderRegistry, type LLMProviderConfig } from '@/lib/services/llm-provider-registry'
 import { authenticateToken, requireAdmin } from '@/middleware/auth'
-import { stripSecretFields, validateEnvVarName, validateExternalUrl } from '@/lib/security/ssrf-guard'
-import { runRouteMiddleware } from '@/lib/route-middleware'
+import { getRouteAuthContext } from '@/lib/route-middleware'
 import { withRateLimit } from '@/lib/security/rate-limiter'
 import { createValidationErrorResponse } from '@/lib/validators'
-import { z } from 'zod'
+import { validateEnvVarName, validateProviderBaseUrl } from '@/lib/security/ssrf-guard'
 
-const PROVIDER_ENV_VAR_PREFIXES = ['PROVIDER_']
-const MAX_URL_LENGTH = 2048
-const MAX_NAME_LENGTH = 255
-const MAX_ENV_VAR_LENGTH = 255
-const MAX_MODEL_ID_LENGTH = 255
-const MAX_PROVIDER_PRIORITY = 1000
+const MAX_NAME_LENGTH = 100
+const MAX_URL_LENGTH = 500
+const MAX_ENV_VAR_LENGTH = 100
+const MAX_MODEL_ID_LENGTH = 200
+const MAX_NOTES_LENGTH = 500
 
-const createProviderSchema = z.object({
+const providerInputSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
-  displayName: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
-  providerType: z.enum(['openai_compat', 'ollama', 'azure']).optional(),
+  providerType: z.enum(['openai_compat', 'ollama']).optional(),
   baseUrl: z.string().trim().min(1).max(MAX_URL_LENGTH),
-  apiKeyEnvVar: z.string().trim().min(1).max(MAX_ENV_VAR_LENGTH).optional(),
   modelId: z.string().trim().min(1).max(MAX_MODEL_ID_LENGTH),
-  defaultParams: z.record(z.string(), z.unknown()).optional(),
-  role: z.enum(['primary', 'fallback_1', 'fallback_2', 'available']).optional(),
-  priority: z.number().int().min(1).max(MAX_PROVIDER_PRIORITY).optional()
-})
+  apiKeyEnvVar: z.string().trim().min(1).max(MAX_ENV_VAR_LENGTH).nullable().optional(),
+  role: z.enum(['primary', 'fallback_1', 'fallback_2', 'available', 'disabled']).optional(),
+  isActive: z.boolean().optional(),
+  timeoutSeconds: z.number().int().min(1).max(3600).optional(),
+  maxTokens: z.number().int().min(1).max(32768).optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  notes: z.string().trim().max(MAX_NOTES_LENGTH).nullable().optional(),
+}).strict()
 
-const updateProviderSchema = z.object({
+const providerUpdateSchema = providerInputSchema.partial().extend({
   id: z.string().trim().min(1).max(255),
-  name: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
-  displayName: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
-  providerType: z.enum(['openai_compat', 'ollama', 'azure']).optional(),
-  baseUrl: z.string().trim().min(1).max(MAX_URL_LENGTH).optional(),
-  apiKeyEnvVar: z.string().trim().min(1).max(MAX_ENV_VAR_LENGTH).optional(),
-  modelId: z.string().trim().min(1).max(MAX_MODEL_ID_LENGTH).optional(),
-  defaultParams: z.record(z.string(), z.unknown()).optional(),
-  role: z.enum(['primary', 'fallback_1', 'fallback_2', 'available']).optional(),
-  priority: z.number().int().min(1).max(MAX_PROVIDER_PRIORITY).optional()
-})
+}).strict()
 
-function sanitizeProvider(provider: Record<string, unknown>) {
-  const safeProvider = stripSecretFields(provider)
+function normalizeProviderPayload(input: unknown): Record<string, unknown> {
+  const value = (input && typeof input === 'object') ? input as Record<string, unknown> : {}
 
   return {
-    ...safeProvider,
-    hasApiKey: typeof provider.apiKeyEnvVar === 'string' && !!process.env[provider.apiKeyEnvVar]
+    id: value.id,
+    name: value.name,
+    providerType: value.providerType ?? value.provider_type,
+    baseUrl: value.baseUrl ?? value.base_url,
+    modelId: value.modelId ?? value.model_id,
+    apiKeyEnvVar: value.apiKeyEnvVar ?? value.api_key_env_var ?? null,
+    role: value.role,
+    isActive: value.isActive ?? value.is_active,
+    timeoutSeconds: value.timeoutSeconds ?? value.timeout_seconds,
+    maxTokens: value.maxTokens ?? value.max_tokens,
+    temperature: value.temperature,
+    notes: value.notes ?? null,
   }
 }
 
-// GET /api/admin/providers - List all providers
-async function handleGet(request: NextRequest) {
-  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+function serializeProvider(provider: LLMProviderConfig) {
+  return {
+    id: provider.id,
+    name: provider.name,
+    providerType: provider.providerType,
+    baseUrl: provider.baseUrl,
+    modelId: provider.modelId,
+    apiKeyEnvVar: provider.apiKeyEnvVar ?? null,
+    role: provider.role,
+    isActive: provider.isActive,
+    timeoutSeconds: provider.timeoutSeconds,
+    maxTokens: provider.maxTokens,
+    temperature: provider.temperature,
+    notes: provider.notes ?? null,
+    hasApiKey: typeof provider.apiKeyEnvVar === 'string' && !!process.env[provider.apiKeyEnvVar],
+    createdAt: provider.createdAt,
+    healthStatus: provider.healthStatus,
+    lastHealthCheck: provider.lastHealthCheck ?? null,
+  }
+}
+
+async function validateProviderInput(input: {
+  baseUrl?: string
+  apiKeyEnvVar?: string | null
+}) {
+  if (input.baseUrl) {
+    const baseUrlError = validateProviderBaseUrl(input.baseUrl)
+    if (baseUrlError) {
+      return `Invalid baseUrl: ${baseUrlError}`
+    }
+  }
+
+  if (typeof input.apiKeyEnvVar === 'string') {
+    const envVarError = validateEnvVarName(input.apiKeyEnvVar, [])
+    if (envVarError) {
+      return `Invalid apiKeyEnvVar: ${envVarError}`
+    }
+  }
+
+  return null
+}
+
+export async function handleGet(request: NextRequest) {
+  const { response: authError } = await getRouteAuthContext(request, authenticateToken, requireAdmin)
   if (authError) return authError
 
   try {
@@ -76,15 +119,14 @@ async function handleGet(request: NextRequest) {
       const chain = await llmProviderRegistry.getProviderChain()
       return NextResponse.json({
         success: true,
-        chain: chain.map(provider => sanitizeProvider(provider as unknown as Record<string, unknown>))
+        chain: chain.map(serializeProvider),
       })
     }
 
-    // Default: list all providers
-    const providers = await llmProviderRegistry.getProviders()
+    const providers = await llmProviderRegistry.availableProviders()
     return NextResponse.json({
       success: true,
-      providers: providers.map(provider => sanitizeProvider(provider as unknown as Record<string, unknown>))
+      providers,
     })
   } catch (error) {
     console.error('[API] Failed to get providers:', error)
@@ -95,14 +137,13 @@ async function handleGet(request: NextRequest) {
   }
 }
 
-// POST /api/admin/providers - Create new provider
-async function handlePost(request: NextRequest) {
-  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+export async function handlePost(request: NextRequest) {
+  const { response: authError, user } = await getRouteAuthContext(request, authenticateToken, requireAdmin)
   if (authError) return authError
 
   try {
-    const body = await request.json()
-    const parsed = createProviderSchema.safeParse(body)
+    const body = normalizeProviderPayload(await request.json())
+    const parsed = providerInputSchema.safeParse(body)
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -111,39 +152,32 @@ async function handlePost(request: NextRequest) {
       )
     }
 
-    const providerInput = parsed.data
-
-    const envVarError = validateEnvVarName(providerInput.apiKeyEnvVar, PROVIDER_ENV_VAR_PREFIXES)
-    if (envVarError) {
+    const inputError = await validateProviderInput(parsed.data)
+    if (inputError) {
       return NextResponse.json(
-        { success: false, error: `Invalid apiKeyEnvVar: ${envVarError}` },
-        { status: 400 }
-      )
-    }
-
-    const ssrfError = await validateExternalUrl(providerInput.baseUrl)
-    if (ssrfError) {
-      return NextResponse.json(
-        { success: false, error: `Invalid baseUrl: ${ssrfError}` },
+        { success: false, error: inputError },
         { status: 400 }
       )
     }
 
     const provider = await llmProviderRegistry.addProvider({
-      name: providerInput.name,
-      displayName: providerInput.displayName || providerInput.name,
-      providerType: providerInput.providerType || 'openai_compat',
-      baseUrl: providerInput.baseUrl,
-      apiKeyEnvVar: providerInput.apiKeyEnvVar,
-      modelId: providerInput.modelId,
-      defaultParams: providerInput.defaultParams,
-      role: providerInput.role || 'available',
-      priority: providerInput.priority
+      name: parsed.data.name,
+      providerType: parsed.data.providerType || 'openai_compat',
+      baseUrl: parsed.data.baseUrl,
+      modelId: parsed.data.modelId,
+      apiKeyEnvVar: parsed.data.apiKeyEnvVar || null,
+      role: parsed.data.role || 'available',
+      isActive: parsed.data.isActive ?? true,
+      timeoutSeconds: parsed.data.timeoutSeconds,
+      maxTokens: parsed.data.maxTokens,
+      temperature: parsed.data.temperature,
+      notes: parsed.data.notes || null,
+      addedBy: user?.userId,
     })
 
     return NextResponse.json({
       success: true,
-      provider: sanitizeProvider(provider as unknown as Record<string, unknown>)
+      provider: serializeProvider(provider),
     })
   } catch (error) {
     console.error('[API] Failed to create provider:', error)
@@ -154,14 +188,13 @@ async function handlePost(request: NextRequest) {
   }
 }
 
-// PUT /api/admin/providers - Update provider
-async function handlePut(request: NextRequest) {
-  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+export async function handlePut(request: NextRequest) {
+  const { response: authError } = await getRouteAuthContext(request, authenticateToken, requireAdmin)
   if (authError) return authError
 
   try {
-    const body = await request.json()
-    const parsed = updateProviderSchema.safeParse(body)
+    const body = normalizeProviderPayload(await request.json())
+    const parsed = providerUpdateSchema.safeParse(body)
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -171,28 +204,27 @@ async function handlePut(request: NextRequest) {
     }
 
     const { id, ...updates } = parsed.data
-
-    if (updates.baseUrl) {
-      const ssrfError = await validateExternalUrl(updates.baseUrl)
-      if (ssrfError) {
-        return NextResponse.json(
-          { success: false, error: `Invalid baseUrl: ${ssrfError}` },
-          { status: 400 }
-        )
-      }
+    const inputError = await validateProviderInput(updates)
+    if (inputError) {
+      return NextResponse.json(
+        { success: false, error: inputError },
+        { status: 400 }
+      )
     }
 
-    if (typeof updates.apiKeyEnvVar === 'string') {
-      const envVarError = validateEnvVarName(updates.apiKeyEnvVar, PROVIDER_ENV_VAR_PREFIXES)
-      if (envVarError) {
-        return NextResponse.json(
-          { success: false, error: `Invalid apiKeyEnvVar: ${envVarError}` },
-          { status: 400 }
-        )
-      }
-    }
-
-    const provider = await llmProviderRegistry.updateProvider(id, updates)
+    const provider = await llmProviderRegistry.updateProvider(id, {
+      name: updates.name,
+      providerType: updates.providerType,
+      baseUrl: updates.baseUrl,
+      modelId: updates.modelId,
+      apiKeyEnvVar: updates.apiKeyEnvVar,
+      role: updates.role,
+      isActive: updates.isActive,
+      timeoutSeconds: updates.timeoutSeconds,
+      maxTokens: updates.maxTokens,
+      temperature: updates.temperature,
+      notes: updates.notes,
+    })
 
     if (!provider) {
       return NextResponse.json(
@@ -203,7 +235,7 @@ async function handlePut(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      provider: sanitizeProvider(provider as unknown as Record<string, unknown>)
+      provider: serializeProvider(provider),
     })
   } catch (error) {
     console.error('[API] Failed to update provider:', error)
@@ -214,9 +246,8 @@ async function handlePut(request: NextRequest) {
   }
 }
 
-// DELETE /api/admin/providers - Delete provider
-async function handleDelete(request: NextRequest) {
-  const authError = await runRouteMiddleware(request, authenticateToken, requireAdmin)
+export async function handleDelete(request: NextRequest) {
+  const { response: authError } = await getRouteAuthContext(request, authenticateToken, requireAdmin)
   if (authError) return authError
 
   try {
@@ -232,14 +263,21 @@ async function handleDelete(request: NextRequest) {
 
     const deleted = await llmProviderRegistry.deleteProvider(id)
 
-    if (!deleted) {
+    if (!deleted.success && deleted.reason === 'not_found') {
       return NextResponse.json(
         { success: false, error: 'Provider not found' },
         { status: 404 }
       )
     }
 
-    return NextResponse.json({ success: true, message: 'Provider deleted' })
+    if (!deleted.success && deleted.reason === 'primary_delete_blocked') {
+      return NextResponse.json(
+        { success: false, error: 'Cannot disable the only active primary provider' },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json({ success: true, message: 'Provider disabled' })
   } catch (error) {
     console.error('[API] Failed to delete provider:', error)
     return NextResponse.json(
@@ -248,7 +286,6 @@ async function handleDelete(request: NextRequest) {
     )
   }
 }
-
 
 export const GET = withRateLimit((request) => handleGet(request as NextRequest), 'admin')
 export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'admin')
