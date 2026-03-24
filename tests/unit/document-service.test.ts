@@ -10,9 +10,10 @@ jest.mock('@/lib/db', () => ({
       update: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
     },
     documentChunk: {
-      create: jest.fn(),
+      createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
   },
@@ -44,7 +45,7 @@ describe('DocumentService', () => {
 
   it('creates a document and stores chunk rows for RAG ingestion', async () => {
     ;(db.document.create as jest.Mock).mockResolvedValue(mockDocumentRecord)
-    ;(db.documentChunk.create as jest.Mock).mockResolvedValue({})
+    ;(db.documentChunk.createMany as jest.Mock).mockResolvedValue({ count: 1 })
 
     const result = await service.createDocument({
       title: 'Air Quality Report',
@@ -64,7 +65,14 @@ describe('DocumentService', () => {
         tags: JSON.stringify(['air', 'punjab']),
       }),
     })
-    expect(db.documentChunk.create).toHaveBeenCalled()
+    expect(db.documentChunk.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          documentId: 'doc-1',
+          chunkIndex: 0,
+        }),
+      ]),
+    })
     expect(result.tags).toEqual(['air', 'punjab'])
   })
 
@@ -119,7 +127,7 @@ describe('DocumentService', () => {
       content: 'Updated document body.',
     })
     ;(db.documentChunk.deleteMany as jest.Mock).mockResolvedValue({ count: 1 })
-    ;(db.documentChunk.create as jest.Mock).mockResolvedValue({})
+    ;(db.documentChunk.createMany as jest.Mock).mockResolvedValue({ count: 1 })
 
     const result = await service.updateDocument('doc-1', {
       content: 'Updated document body.',
@@ -129,7 +137,7 @@ describe('DocumentService', () => {
     expect(db.documentChunk.deleteMany).toHaveBeenCalledWith({
       where: { documentId: 'doc-1' },
     })
-    expect(db.documentChunk.create).toHaveBeenCalled()
+    expect(db.documentChunk.createMany).toHaveBeenCalled()
     expect(db.document.update).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: expect.objectContaining({
@@ -239,12 +247,16 @@ describe('DocumentService', () => {
   })
 
   it('builds statistics grouped by category and year', async () => {
-    ;(db.document.findMany as jest.Mock).mockResolvedValue([
-      { category: 'Air Quality', year: 2024 },
-      { category: 'Air Quality', year: 2024 },
-      { category: 'Water Resources', year: 2023 },
-      { category: null, year: null },
-    ])
+    ;(db.document.count as jest.Mock).mockResolvedValue(4)
+    ;(db.document.groupBy as jest.Mock)
+      .mockResolvedValueOnce([
+        { category: 'Air Quality', _count: { category: 2 } },
+        { category: 'Water Resources', _count: { category: 1 } },
+      ])
+      .mockResolvedValueOnce([
+        { year: 2024, _count: { year: 2 } },
+        { year: 2023, _count: { year: 1 } },
+      ])
 
     const result = await service.getStatistics()
 

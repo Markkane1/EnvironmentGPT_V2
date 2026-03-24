@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import Home from '@/app/page'
+import { APP_CONFIG } from '@/lib/constants'
 import { useChatStore } from '@/lib/store'
 
 jest.mock('@/components/chat/sidebar', () => ({
@@ -54,5 +55,15 @@ describe('Home page accessibility', () => {
     await waitFor(() => {
       expect(screen.getByRole('link', { name: /admin/i })).toBeInTheDocument()
     })
+  })
+
+  it('uses the shared organization URL for the EPA Punjab external link', () => {
+    useChatStore.setState({
+      sidebarOpen: true,
+    })
+
+    render(<Home />)
+
+    expect(screen.getByRole('link', { name: /epa punjab/i })).toHaveAttribute('href', APP_CONFIG.organizationUrl)
   })
 })

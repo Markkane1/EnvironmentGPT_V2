@@ -22,7 +22,7 @@ jest.mock('mammoth', () => ({
 jest.mock('word-extractor', () => mockWordExtractor)
 
 import { extractTextFromDocumentFile } from '@/lib/utils/document-extraction'
-import { isSupportedDocumentFile } from '@/lib/utils/document-upload'
+import { getSupportedDocumentError, isSupportedDocumentFile } from '@/lib/utils/document-upload'
 import { SUPPORTED_FILE_TYPES } from '@/lib/constants'
 
 function createTestFile(
@@ -61,6 +61,13 @@ describe('document upload support', () => {
     expect(isSupportedDocumentFile(createTestFile(['md'], 'report.md', { type: '' }))).toBe(true)
   })
 
+  it('rejects unsupported file types and reports the supported families in the validation message', () => {
+    const file = createTestFile(['binary'], 'malware.exe', { type: 'application/octet-stream' })
+
+    expect(isSupportedDocumentFile(file)).toBe(false)
+    expect(getSupportedDocumentError(50 * 1024 * 1024)).toContain('less than 50MB')
+  })
+
   it('only advertises file families that the extractor actually supports', () => {
     expect(SUPPORTED_FILE_TYPES).toEqual({
       documents: ['.pdf', '.doc', '.docx', '.md', '.markdown', '.txt'],
@@ -78,6 +85,14 @@ describe('document upload support', () => {
       fileType: 'text/markdown',
       fileSize: file.size,
     })
+  })
+
+  it('rejects empty extracted text from plain text files', async () => {
+    const file = createTestFile(['   \r\n  '], 'empty.txt', { type: 'text/plain' })
+
+    await expect(extractTextFromDocumentFile(file)).rejects.toThrow(
+      'No readable text could be extracted from the text file'
+    )
   })
 
   it('uses the PDF parser for PDF files', async () => {
@@ -130,5 +145,11 @@ describe('document upload support', () => {
     expect(mockWordExtractor).toHaveBeenCalled()
     expect(mockWordExtract).toHaveBeenCalledWith(expect.any(Buffer))
     expect(result.content).toBe('Legacy body\n\nFootnote\n\nHeader\n\nTextbox')
+  })
+
+  it('throws a safe unsupported-file error before extraction begins', async () => {
+    const file = createTestFile(['binary'], 'archive.zip', { type: 'application/zip' })
+
+    await expect(extractTextFromDocumentFile(file)).rejects.toThrow('Unsupported file type')
   })
 })

@@ -125,36 +125,46 @@ export function DocumentUploadModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-green-600" />
+            <Upload className="w-5 h-5 text-teal-700" />
             Upload Document
           </DialogTitle>
           <DialogDescription>
-            Add a new document to the environmental knowledge base from text, Markdown, PDF, or Word files
+            Add a new document to the environmental knowledge base from text, Markdown, PDF, or Word files.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* File Upload */}
+          {/* File Upload — styled dropzone */}
           <div className="space-y-2">
-            <Label htmlFor="file">Upload File (optional)</Label>
-            <div className="flex items-center gap-2">
-              <Input
+            <Label htmlFor="file">File <span className="font-normal text-gray-400">(optional)</span></Label>
+            <label
+              htmlFor="file"
+              className="group flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center transition-colors hover:border-teal-300 hover:bg-teal-50/40"
+            >
+              {file ? (
+                <div className="flex items-center gap-2 text-sm text-teal-700">
+                  <FileText className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">{file.name}</span>
+                  <span className="text-gray-400">({(file.size / 1024).toFixed(1)} KB)</span>
+                </div>
+              ) : (
+                <>
+                  <Upload className="mb-2 h-8 w-8 text-gray-300 group-hover:text-teal-400 transition-colors" />
+                  <p className="text-sm text-gray-500">Click to choose a file</p>
+                  <p className="mt-1 text-xs text-gray-400">PDF, Word, Markdown, TXT</p>
+                </>
+              )}
+              <input
                 id="file"
                 type="file"
                 accept={SUPPORTED_DOCUMENT_ACCEPT}
                 onChange={handleFileChange}
-                className="flex-1"
+                className="sr-only"
               />
-            </div>
-            {file && (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <FileText className="w-4 h-4" />
-                {file.name} ({(file.size / 1024).toFixed(1)} KB)
-              </div>
-            )}
+            </label>
           </div>
 
           {/* Title */}
@@ -204,13 +214,18 @@ export function DocumentUploadModal({
 
           {/* Content */}
           <div className="space-y-2">
-            <Label htmlFor="content">Content {file ? '(optional when a file is selected)' : '*'}</Label>
+            <Label htmlFor="content">
+              Content{' '}
+              <span className="font-normal text-gray-400">
+                {file ? '(optional with file)' : '*'}
+              </span>
+            </Label>
             <Textarea
               id="content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder={file ? 'Optional notes or fallback text for the uploaded file...' : 'Paste or type the document content here...'}
-              className="min-h-[200px]"
+              placeholder={file ? 'Optional notes or supplementary text…' : 'Paste or type the document content here…'}
+              className="min-h-[120px]"
             />
           </div>
         </div>
@@ -219,10 +234,9 @@ export function DocumentUploadModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button 
+          <Button
             onClick={handleSubmit}
             disabled={isLoading || !title.trim() || (!file && !content.trim()) || !category}
-            className="bg-green-600 hover:bg-green-700"
           >
             {isLoading ? (
               <>

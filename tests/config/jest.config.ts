@@ -19,10 +19,34 @@ const config: Config = {
   ],
   coverageThreshold: {
     global: {
-      branches: 20,
-      functions: 20,
-      lines: 20,
-      statements: 20,
+      branches: 50,
+      functions: 70,
+      lines: 70,
+      statements: 70,
+    },
+    './backend/src/app/api/auth/': {
+      branches: 80,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    './backend/src/lib/auth.ts': {
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    './backend/src/middleware/auth.ts': {
+      branches: 80,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    './backend/src/app/api/users/route.ts': {
+      branches: 80,
+      functions: 90,
+      lines: 90,
+      statements: 90,
     },
   },
   verbose: true,

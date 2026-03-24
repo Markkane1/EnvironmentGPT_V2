@@ -37,6 +37,7 @@ import {
   Activity,
   Server
 } from 'lucide-react'
+import { getApiErrorMessage } from '@/lib/api-errors'
 
 interface LLMProvider {
   id: string
@@ -97,13 +98,22 @@ const defaultFormData = {
   notes: ''
 }
 
+function normalizeOptionalString(value: string) {
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 export function ProvidersSettingsPanel() {
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<ProviderStats | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isRunningHealthCheck, setIsRunningHealthCheck] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [testResults, setTestResults] = useState<Record<string, {
     success: boolean
     latencyMs: number
@@ -118,9 +128,13 @@ export function ProvidersSettingsPanel() {
       const data = await response.json()
       if (data.success) {
         setProviders(data.providers)
+        setError(null)
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to load providers'))
       }
     } catch (error) {
       console.error('Failed to fetch providers:', error)
+      setError('Failed to load providers')
     } finally {
       setLoading(false)
     }
@@ -132,9 +146,12 @@ export function ProvidersSettingsPanel() {
       const data = await response.json()
       if (data.success) {
         setStats(data.stats)
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to load provider statistics'))
       }
     } catch (error) {
       console.error('Failed to fetch stats:', error)
+      setError('Failed to load provider statistics')
     }
   }
 
@@ -142,6 +159,15 @@ export function ProvidersSettingsPanel() {
     fetchProviders()
     fetchStats()
   }, [])
+
+  const refreshData = async () => {
+    setIsRefreshing(true)
+    try {
+      await Promise.all([fetchProviders(), fetchStats()])
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
 
   const handleTestProvider = async (id: string) => {
     setTestingId(id)
@@ -166,21 +192,36 @@ export function ProvidersSettingsPanel() {
   }
 
   const handleHealthCheck = async () => {
+    setIsRunningHealthCheck(true)
     try {
       await fetch('/api/admin/providers?action=health')
-      fetchProviders()
-      fetchStats()
+      setError(null)
+      await Promise.all([fetchProviders(), fetchStats()])
     } catch (error) {
       console.error('Health check failed:', error)
+      setError('Failed to run provider health check')
+    } finally {
+      setIsRunningHealthCheck(false)
     }
   }
 
   const handleSubmit = async () => {
+    if (isSaving) {
+      return
+    }
+
+    setIsSaving(true)
     try {
+      const payload = {
+        ...formData,
+        apiKeyEnvVar: normalizeOptionalString(formData.apiKeyEnvVar),
+        notes: normalizeOptionalString(formData.notes),
+      }
+
       const response = await fetch('/api/admin/providers', {
         method: editingProvider ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingProvider ? { id: editingProvider.id, ...formData } : formData)
+        body: JSON.stringify(editingProvider ? { id: editingProvider.id, ...payload } : payload)
       })
 
       const data = await response.json()
@@ -188,11 +229,16 @@ export function ProvidersSettingsPanel() {
         setDialogOpen(false)
         setEditingProvider(null)
         setFormData(defaultFormData)
-        fetchProviders()
-        fetchStats()
+        setError(null)
+        await Promise.all([fetchProviders(), fetchStats()])
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to save provider'))
       }
     } catch (error) {
       console.error('Failed to save provider:', error)
+      setError('Failed to save provider')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -203,11 +249,15 @@ export function ProvidersSettingsPanel() {
       const response = await fetch(`/api/admin/providers?id=${id}`, { method: 'DELETE' })
       const data = await response.json()
       if (data.success) {
+        setError(null)
         fetchProviders()
         fetchStats()
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to delete provider'))
       }
     } catch (error) {
       console.error('Failed to delete provider:', error)
+      setError('Failed to delete provider')
     }
   }
 
@@ -218,10 +268,12 @@ export function ProvidersSettingsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: provider.id, isActive: !provider.isActive })
       })
+      setError(null)
       fetchProviders()
       fetchStats()
     } catch (error) {
       console.error('Failed to toggle provider:', error)
+      setError('Failed to update provider status')
     }
   }
 
@@ -251,7 +303,7 @@ export function ProvidersSettingsPanel() {
   const getHealthBadge = (status: string) => {
     switch (status) {
       case 'healthy':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="mr-1 h-3 w-3" />Healthy</Badge>
+        return <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline"><CheckCircle className="mr-1 h-3 w-3" />Healthy</Badge>
       case 'unhealthy':
         return <Badge className="bg-red-100 text-red-800"><AlertCircle className="mr-1 h-3 w-3" />Unhealthy</Badge>
       default:
@@ -274,6 +326,16 @@ export function ProvidersSettingsPanel() {
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <div
+          className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          role="alert"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
@@ -292,9 +354,9 @@ export function ProvidersSettingsPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Active</p>
-                <p className="text-2xl font-bold text-green-600">{stats?.activeProviders || 0}</p>
+                <p className="text-2xl font-bold text-teal-700">{stats?.activeProviders || 0}</p>
               </div>
-              <Activity className="h-8 w-8 text-green-600" />
+              <Activity className="h-8 w-8 text-teal-600" />
             </div>
           </CardContent>
         </Card>
@@ -327,13 +389,13 @@ export function ProvidersSettingsPanel() {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">LLM Providers</h3>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { fetchProviders(); fetchStats() }}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={refreshData} disabled={isRefreshing || isRunningHealthCheck}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button variant="outline" onClick={handleHealthCheck}>
-            <Activity className="mr-2 h-4 w-4" />
-            Health Check
+          <Button variant="outline" onClick={handleHealthCheck} disabled={isRunningHealthCheck || isRefreshing}>
+            <Activity className={`mr-2 h-4 w-4 ${isRunningHealthCheck ? 'animate-spin' : ''}`} />
+            {isRunningHealthCheck ? 'Checking...' : 'Health Check'}
           </Button>
           <Dialog
             open={dialogOpen}
@@ -351,7 +413,7 @@ export function ProvidersSettingsPanel() {
                 Add Provider
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingProvider ? 'Edit Provider' : 'Add New LLM Provider'}</DialogTitle>
                 <DialogDescription>
@@ -515,8 +577,10 @@ export function ProvidersSettingsPanel() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleSubmit}>{editingProvider ? 'Update' : 'Add'} Provider</Button>
+                <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
+                <Button onClick={handleSubmit} disabled={isSaving}>
+                  {isSaving ? 'Saving...' : `${editingProvider ? 'Update' : 'Add'} Provider`}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -553,8 +617,8 @@ export function ProvidersSettingsPanel() {
                         {testResults[provider.id] && (
                           <p className="mt-1 text-xs">
                             {testResults[provider.id].success ? (
-                              <span className="text-green-600">
-                                Test passed - {testResults[provider.id].latencyMs}ms
+                              <span className="text-teal-700">
+                                Test passed — {testResults[provider.id].latencyMs}ms
                               </span>
                             ) : (
                               <span className="text-red-600">
@@ -572,7 +636,7 @@ export function ProvidersSettingsPanel() {
                     <TableCell>{getHealthBadge(provider.healthStatus)}</TableCell>
                     <TableCell>
                       {provider.hasApiKey ? (
-                        <Badge className="bg-green-100 text-green-800">Configured</Badge>
+                        <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline">Configured</Badge>
                       ) : (
                         <Badge className="bg-yellow-100 text-yellow-800">Not Set</Badge>
                       )}

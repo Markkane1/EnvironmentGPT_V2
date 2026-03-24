@@ -1,11 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { 
@@ -32,8 +35,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  MessageSquare, 
-  FileText, 
+  MessageSquare,
+  FileText,
   Activity,
   Clock,
   ThumbsUp,
@@ -50,7 +53,9 @@ import {
   CheckCircle,
   XCircle,
   Search,
-  Download
+  Download,
+  LogOut,
+  ChevronLeft,
 } from 'lucide-react'
 import { DOCUMENT_CATEGORIES } from '@/lib/constants'
 import { toast } from '@/hooks/use-toast'
@@ -99,8 +104,11 @@ interface DashboardStats {
 }
 
 export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab?: string }) {
+  const router = useRouter()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [statsError, setStatsError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [activeTab, setActiveTab] = useState(initialTab)
   const [searchQuery, setSearchQuery] = useState('')
@@ -141,6 +149,10 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
         fetch('/api/cache')
       ])
 
+      if (![overviewRes, chatRes, docsRes, feedbackRes, healthRes, cacheRes].every((response) => response.ok)) {
+        throw new Error('Failed to refresh dashboard statistics')
+      }
+
       const [overview, chat, documents, feedback, health, cache] = await Promise.all([
         overviewRes.json(),
         chatRes.json(),
@@ -158,9 +170,10 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
         health: health.health || { status: 'unknown', uptime: 0, services: [] },
         cache: cache.stats || { totalEntries: 0, hitRate: 0, memoryUsageMB: 0 }
       })
+      setStatsError(null)
       setLastUpdated(new Date())
     } catch (error) {
-      console.error('Failed to fetch stats:', error)
+      setStatsError(error instanceof Error ? error.message : 'Failed to fetch stats')
     } finally {
       setIsLoading(false)
     }
@@ -174,14 +187,43 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
 
   const clearCache = async () => {
     try {
-      await fetch('/api/cache', {
+      const response = await fetch('/api/cache', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'clear' })
       })
-      fetchStats()
+
+      if (!response.ok) {
+        throw new Error('Failed to clear cache')
+      }
+
+      await fetchStats()
+      toast({
+        title: 'Cache cleared',
+        description: 'Dashboard cache metrics have been refreshed.'
+      })
     } catch (error) {
-      console.error('Failed to clear cache:', error)
+      toast({
+        title: 'Cache clear failed',
+        description: error instanceof Error ? error.message : 'Failed to clear cache',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true)
+
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+      })
+    } catch (error) {
+      console.error('Failed to log out:', error)
+    } finally {
+      router.push('/login')
+      router.refresh()
+      setIsLoggingOut(false)
     }
   }
 
@@ -290,12 +332,13 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
         <div className="max-w-7xl mx-auto space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => (
-              <Card key={i} className="animate-pulse">
+              <Card key={i}>
                 <CardHeader className="pb-2">
-                  <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                  <Skeleton className="h-4 w-1/2" />
                 </CardHeader>
                 <CardContent>
-                  <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+                  <Skeleton className="h-8 w-1/3" />
+                  <Skeleton className="mt-2 h-3 w-1/2" />
                 </CardContent>
               </Card>
             ))}
@@ -309,26 +352,39 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+        <div className="max-w-7xl mx-auto px-6 py-3">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <p className="text-gray-500 text-sm">EPA Punjab EnvironmentGPT Management</p>
-            </div>
             <div className="flex items-center gap-4">
-              <Badge 
-                variant={stats?.health?.status === 'healthy' ? 'default' : 'destructive'}
-                className={stats?.health?.status === 'healthy' ? 'bg-green-100 text-green-700' : ''}
+              <Button variant="ghost" size="sm" className="gap-1.5 text-gray-500 hover:text-gray-700 -ml-2" asChild>
+                <Link href="/">
+                  <ChevronLeft className="w-4 h-4" />
+                  Back to App
+                </Link>
+              </Button>
+              <div className="h-5 w-px bg-gray-200" />
+              <div>
+                <h1 className="text-lg font-semibold text-gray-900 leading-tight">Admin Dashboard</h1>
+                <p className="text-xs text-gray-500">EPA Punjab EnvironmentGPT</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge
+                variant={stats?.health?.status === 'healthy' ? 'outline' : 'destructive'}
+                className={stats?.health?.status === 'healthy' ? 'border-teal-200 bg-teal-50 text-teal-700' : ''}
               >
                 <Activity className="w-3 h-3 mr-1" />
                 {stats?.health?.status || 'Unknown'}
               </Badge>
-              <span className="text-sm text-gray-500">
-                Updated: {lastUpdated.toLocaleTimeString()}
+              <span className="hidden text-xs text-gray-400 sm:inline">
+                {lastUpdated.toLocaleTimeString()}
               </span>
-              <Button variant="outline" size="sm" onClick={fetchStats}>
-                <RefreshCw className="w-4 h-4 mr-1" />
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchStats}>
+                <RefreshCw className="w-3.5 h-3.5" />
                 Refresh
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={handleLogout} disabled={isLoggingOut}>
+                <LogOut className="w-3.5 h-3.5" />
+                {isLoggingOut ? 'Signing out...' : 'Sign out'}
               </Button>
             </div>
           </div>
@@ -336,6 +392,11 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
       </div>
 
       <div className="max-w-7xl mx-auto p-6">
+        {statsError ? (
+          <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {statsError}
+          </div>
+        ) : null}
         {/* Quick Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatsCard
@@ -343,7 +404,7 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
             value={stats?.overview?.documents || 0}
             subtitle={`${stats?.documents?.total || 0} active`}
             icon={<FileText className="w-5 h-5" />}
-            color="green"
+            color="teal"
           />
           <StatsCard
             title="Chat Sessions"
@@ -370,7 +431,7 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="bg-white border">
+          <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
@@ -393,7 +454,7 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Database className="w-5 h-5 text-green-600" />
+                    <Database className="w-5 h-5 text-teal-700" />
                     Documents by Category
                   </CardTitle>
                 </CardHeader>
@@ -458,7 +519,7 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Server className="w-5 h-5 text-green-600" />
+                  <Server className="w-5 h-5 text-teal-700" />
                   System Health
                 </CardTitle>
               </CardHeader>
@@ -545,7 +606,7 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
                           </TableCell>
                           <TableCell>{doc.year || '-'}</TableCell>
                           <TableCell>
-                            <Badge className="bg-green-100 text-green-700">Active</Badge>
+                            <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">Active</Badge>
                           </TableCell>
                           <TableCell>{new Date(doc.createdAt).toLocaleDateString()}</TableCell>
                           <TableCell className="text-right">
@@ -756,9 +817,9 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
                           {service.latency && (
                             <Badge variant="outline">{service.latency}ms</Badge>
                           )}
-                          <Badge 
-                            variant={service.status === 'up' ? 'default' : 'destructive'}
-                            className={service.status === 'up' ? 'bg-green-100 text-green-700' : ''}
+                          <Badge
+                            variant={service.status === 'up' ? 'outline' : 'destructive'}
+                            className={service.status === 'up' ? 'border-teal-200 bg-teal-50 text-teal-700' : ''}
                           >
                             {service.status}
                           </Badge>
@@ -779,15 +840,15 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-3 gap-4">
                     <div className="p-3 bg-gray-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-blue-600">{stats?.cache?.totalEntries || 0}</p>
+                      <p className="text-2xl font-bold text-teal-700">{stats?.cache?.totalEntries || 0}</p>
                       <p className="text-xs text-gray-500">Cached Items</p>
                     </div>
                     <div className="p-3 bg-gray-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-green-600">{Math.round((stats?.cache?.hitRate || 0) * 100)}%</p>
+                      <p className="text-2xl font-bold text-teal-700">{Math.round((stats?.cache?.hitRate || 0) * 100)}%</p>
                       <p className="text-xs text-gray-500">Hit Rate</p>
                     </div>
                     <div className="p-3 bg-gray-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-purple-600">{stats?.cache?.memoryUsageMB?.toFixed(2) || 0}</p>
+                      <p className="text-2xl font-bold text-teal-700">{stats?.cache?.memoryUsageMB?.toFixed(2) || 0}</p>
                       <p className="text-xs text-gray-500">Memory (MB)</p>
                     </div>
                   </div>
@@ -849,21 +910,21 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
 }
 
 // Stats Card Component
-function StatsCard({ 
-  title, 
-  value, 
-  subtitle, 
-  icon, 
-  color 
-}: { 
+function StatsCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  color
+}: {
   title: string
   value: string | number
   subtitle: string
   icon: React.ReactNode
-  color: 'green' | 'blue' | 'purple' | 'amber'
+  color: 'teal' | 'blue' | 'purple' | 'amber'
 }) {
   const colorClasses = {
-    green: 'text-green-600',
+    teal: 'text-teal-700',
     blue: 'text-blue-600',
     purple: 'text-purple-600',
     amber: 'text-amber-600'

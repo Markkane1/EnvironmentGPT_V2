@@ -6,6 +6,7 @@ jest.mock('@/lib/db', () => ({
     document: {
       count: jest.fn(),
       findMany: jest.fn(),
+      groupBy: jest.fn(),
     },
     chatSession: {
       count: jest.fn(),
@@ -15,6 +16,8 @@ jest.mock('@/lib/db', () => ({
     },
     feedback: {
       count: jest.fn(),
+      aggregate: jest.fn(),
+      groupBy: jest.fn(),
       findMany: jest.fn(),
     },
     lLMRequestLog: {
@@ -121,14 +124,17 @@ describe('/api/stats contract', () => {
   })
 
   it('returns recent feedback entries alongside aggregate feedback stats', async () => {
-    ;(db.feedback.findMany as jest.Mock)
-      .mockResolvedValueOnce([
-        { id: 'feedback-1', rating: 5, comment: 'Helpful', createdAt: new Date('2026-03-22T00:00:00.000Z') },
-        { id: 'feedback-2', rating: 2, comment: null, createdAt: new Date('2026-03-21T00:00:00.000Z') },
-      ])
-      .mockResolvedValueOnce([
-        { id: 'feedback-1', rating: 5, comment: 'Helpful', createdAt: new Date('2026-03-22T00:00:00.000Z') },
-      ])
+    ;(db.feedback.count as jest.Mock).mockResolvedValue(2)
+    ;(db.feedback.aggregate as jest.Mock).mockResolvedValue({
+      _avg: { rating: 3.5 },
+    })
+    ;(db.feedback.groupBy as jest.Mock).mockResolvedValue([
+      { rating: 5, _count: { rating: 1 } },
+      { rating: 2, _count: { rating: 1 } },
+    ])
+    ;(db.feedback.findMany as jest.Mock).mockResolvedValue([
+      { id: 'feedback-1', rating: 5, comment: 'Helpful', createdAt: new Date('2026-03-22T00:00:00.000Z') },
+    ])
 
     const response = await GET(adminRequest('http://localhost/api/stats?type=feedback'))
     const body = await response.json()

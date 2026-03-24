@@ -3,6 +3,7 @@ import {
   ACCESS_TOKEN_COOKIE_NAME,
   ACCESS_TOKEN_MAX_AGE,
   extractCookieValue,
+  getBackendUrl,
   getAuthCookieOptions,
   REFRESH_TOKEN_COOKIE_NAME,
   REFRESH_TOKEN_MAX_AGE,
@@ -11,7 +12,7 @@ import {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001'
+    const backendUrl = getBackendUrl()
     const backendResponse = await fetch(`${backendUrl}/api/auth/login`, {
       method: 'POST',
       headers: {

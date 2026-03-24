@@ -19,6 +19,8 @@ jest.mock('@/lib/db', () => ({
     },
     feedback: {
       count: jest.fn(),
+      aggregate: jest.fn(),
+      groupBy: jest.fn(),
       findMany: jest.fn(),
     },
   },

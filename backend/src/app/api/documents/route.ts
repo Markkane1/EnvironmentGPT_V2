@@ -37,6 +37,32 @@ const DOCUMENT_CATEGORIES: ReadonlySet<DocumentCategory> = new Set([
   'Urban Environment',
 ])
 
+const MAX_PAGE_SIZE = 100
+const MAX_SEARCH_LIMIT = 100
+const MAX_COLLECTION_CONTENT_PREVIEW = 500
+
+function clampPositiveInteger(value: string | null, fallback: number, max: number): number {
+  const parsed = Number.parseInt(value || '', 10)
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback
+  }
+
+  return Math.min(parsed, max)
+}
+
+function summarizeDocumentForCollection<T extends { content: string; chunks?: unknown }>(document: T): T {
+  const content = typeof document.content === 'string' ? document.content : ''
+
+  return {
+    ...document,
+    content: content.length > MAX_COLLECTION_CONTENT_PREVIEW
+      ? content.slice(0, MAX_COLLECTION_CONTENT_PREVIEW) + '...'
+      : content,
+    chunks: undefined
+  }
+}
+
 function parseAudience(value: string | null): AudienceType | undefined {
   if (!value || !AUDIENCE_TYPES.has(value as AudienceType)) {
     return undefined
@@ -94,8 +120,8 @@ export async function GET(request: NextRequest) {
       yearTo: searchParams.get('yearTo') ? parseInt(searchParams.get('yearTo')!) : undefined,
       audience: parseAudience(searchParams.get('audience')),
       searchQuery: searchParams.get('q') || undefined,
-      page: parseInt(searchParams.get('page') || '1'),
-      pageSize: parseInt(searchParams.get('pageSize') || '10'),
+      page: clampPositiveInteger(searchParams.get('page'), 1, MAX_PAGE_SIZE),
+      pageSize: clampPositiveInteger(searchParams.get('pageSize'), 10, MAX_PAGE_SIZE),
     }
     
     // Check if it's a search query
@@ -107,7 +133,7 @@ export async function GET(request: NextRequest) {
       result = await documentService.searchDocuments(
         query,
         filter,
-        parseInt(searchParams.get('limit') || '10'),
+        clampPositiveInteger(searchParams.get('limit'), 10, MAX_SEARCH_LIMIT),
         user.role === 'admin' ? undefined : user.userId
       )
     } else {
@@ -119,10 +145,13 @@ export async function GET(request: NextRequest) {
         user.role === 'admin' ? undefined : user.userId
       )
     }
+
+    const documents = result.documents.map((document) => summarizeDocumentForCollection(document))
     
     return NextResponse.json({
       success: true,
       ...result,
+      documents,
       timestamp: new Date()
     })
     

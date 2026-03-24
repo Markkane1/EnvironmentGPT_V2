@@ -68,7 +68,8 @@ export const createDocumentSchema = z.object({
   
   content: z.string()
     .min(100, 'Content must be at least 100 characters')
-    .max(1000000, 'Content must be less than 1000000 characters'),
+    .max(1000000, 'Content must be less than 1000000 characters')
+    .refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed'),
   
   source: z.string().max(2048).refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed').optional(),
   
@@ -250,3 +251,4 @@ export class ValidationError extends Error {
     return createValidationErrorResponse(new z.ZodError(this.errors))
   }
 }
+

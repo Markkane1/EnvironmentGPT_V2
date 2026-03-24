@@ -156,6 +156,7 @@ describe('EnhancedChatInterface regressions', () => {
       rating: 5,
     })
   })
+
   it('clears stale sources when starting a new chat', async () => {
     fetchMock.mockResolvedValueOnce({
       json: async () => ({
@@ -180,10 +181,10 @@ describe('EnhancedChatInterface regressions', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Tell me about air quality' } })
     fireEvent.click(screen.getByRole('button', { name: /send/i }))
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /sources/i })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /1 source/i }).length).toBeGreaterThan(0))
 
     fireEvent.click(screen.getByRole('button', { name: /start new chat/i }))
 
-    expect(screen.queryByRole('button', { name: /sources/i })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('button', { name: /1 source/i })).toHaveLength(0)
   })
 })

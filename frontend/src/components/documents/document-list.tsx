@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Document } from '@/types'
 import { cn } from '@/lib/utils'
+import { toast } from '@/hooks/use-toast'
 
 interface DocumentListProps {
   onUploadClick?: () => void
@@ -35,6 +36,8 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [totalDocs, setTotalDocs] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // Fetch documents
   useEffect(() => {
@@ -48,12 +51,17 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
         const response = await fetch(`/api/documents?${params}`)
         const data = await response.json()
         
-        if (data.success) {
-          setDocuments(data.documents || [])
-          setTotalDocs(data.total || 0)
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to load documents')
         }
+
+        setDocuments(data.documents || [])
+        setTotalDocs(data.total || 0)
+        setError(null)
       } catch (error) {
-        console.error('Failed to fetch documents:', error)
+        setDocuments([])
+        setTotalDocs(0)
+        setError(error instanceof Error ? error.message : 'Failed to load documents')
       } finally {
         setIsLoading(false)
       }
@@ -64,18 +72,39 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
 
   // Handle document delete
   const handleDelete = async (docId: string) => {
+    if (deletingId === docId) return
+    if (!window.confirm('Delete this document from the knowledge base?')) {
+      return
+    }
+
+    setDeletingId(docId)
     try {
       const response = await fetch(`/api/documents?id=${docId}`, {
         method: 'DELETE'
       })
       const data = await response.json()
       
-      if (data.success) {
-        setDocuments(docs => docs.filter(d => d.id !== docId))
-        setTotalDocs(t => t - 1)
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete document')
       }
+
+      setDocuments(docs => docs.filter(d => d.id !== docId))
+      setTotalDocs(t => Math.max(0, t - 1))
+      setError(null)
+      toast({
+        title: 'Document deleted',
+        description: 'The document was removed from the knowledge base.'
+      })
     } catch (error) {
-      console.error('Failed to delete document:', error)
+      const message = error instanceof Error ? error.message : 'Failed to delete document'
+      setError(message)
+      toast({
+        title: 'Delete failed',
+        description: message,
+        variant: 'destructive'
+      })
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -101,11 +130,7 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
             {totalDocs} Documents
           </span>
           {onUploadClick && (
-            <Button 
-              size="sm" 
-              onClick={onUploadClick}
-              className="bg-green-600 hover:bg-green-700"
-            >
+            <Button size="sm" onClick={onUploadClick}>
               <Upload className="w-3 h-3 mr-1" />
               Upload
             </Button>
@@ -125,6 +150,14 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
       {/* Document List */}
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1">
+          {error ? (
+            <div
+              className="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              role="alert"
+            >
+              {error}
+            </div>
+          ) : null}
           {isLoading ? (
             <>
               <Skeleton className="h-20 w-full" />
@@ -136,10 +169,12 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
               <div
                 key={doc.id}
                 className={cn(
-                  'p-3 rounded-lg border bg-white hover:bg-gray-50 cursor-pointer',
+                  'p-3 rounded-lg border bg-white hover:bg-gray-50',
                   'transition-colors group'
                 )}
-                onClick={() => onSelectDocument?.(doc)}
+                role={onSelectDocument ? 'button' : undefined}
+                tabIndex={onSelectDocument ? 0 : undefined}
+                onClick={onSelectDocument ? () => onSelectDocument(doc) : undefined}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
@@ -189,12 +224,15 @@ export function DocumentList({ onUploadClick, onSelectDocument }: DocumentListPr
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onSelectDocument?.(doc)}>
-                        <Eye className="w-4 h-4 mr-2" />
-                        View
-                      </DropdownMenuItem>
+                      {onSelectDocument ? (
+                        <DropdownMenuItem onClick={() => onSelectDocument(doc)}>
+                          <Eye className="w-4 h-4 mr-2" />
+                          View
+                        </DropdownMenuItem>
+                      ) : null}
                       <DropdownMenuItem 
                         className="text-red-600"
+                        disabled={deletingId === doc.id}
                         onClick={(e) => {
                           e.stopPropagation()
                           handleDelete(doc.id)

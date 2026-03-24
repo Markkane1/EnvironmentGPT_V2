@@ -253,9 +253,8 @@ export class EnhancedRAGService {
         processedQuery
       )
 
-      // TODO: Add native streaming support to llmProviderRegistry when the
-      // provider chain supports SSE/stream:true. For now we fetch the full
-      // response and simulate streaming by yielding word chunks.
+      // Native provider streaming is not wired through the registry yet,
+      // so the current fallback streams the completed response in word chunks.
       const llmResult = await llmProviderRegistry.chatCompletion({
         messages: this.buildMessages(systemPrompt, conversationHistory, request.message),
         temperature: 0.7,

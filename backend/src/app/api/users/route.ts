@@ -12,23 +12,29 @@ import { withRateLimit } from '@/lib/security/rate-limiter'
 import { createValidationErrorResponse } from '@/lib/validators'
 import { z } from 'zod'
 
+const HTML_LIKE_PATTERN = /[<>]/
+
+function rejectHtmlLikeMarkup(value: string) {
+  return !HTML_LIKE_PATTERN.test(value)
+}
+
 // User schema for validation
 const createUserSchema = z.object({
   email: z.string().trim().email().max(320),
   username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
   password: z.string().min(8).max(128).optional(),
-  name: z.string().trim().min(2).max(255),
+  name: z.string().trim().min(2).max(255).refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed'),
   role: z.enum(['admin', 'analyst', 'viewer', 'guest']).default('viewer'),
-  department: z.string().trim().min(1).max(255).optional()
+  department: z.string().trim().min(1).max(255).refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed').optional()
 }).strict()
 
 const updateUserSchema = z.object({
   email: z.string().trim().email().max(320).optional(),
   username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
   password: z.string().min(8).max(128).optional(),
-  name: z.string().trim().min(2).max(255).optional(),
+  name: z.string().trim().min(2).max(255).refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed').optional(),
   role: z.enum(['admin', 'analyst', 'viewer', 'guest']).optional(),
-  department: z.string().trim().min(1).max(255).optional()
+  department: z.string().trim().min(1).max(255).refine(rejectHtmlLikeMarkup, 'HTML-like markup is not allowed').optional()
 }).strict()
 
 function isNotFoundError(error: unknown): boolean {
@@ -295,3 +301,4 @@ export const GET = withRateLimit((request) => handleGet(request as NextRequest),
 export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'admin')
 export const PATCH = withRateLimit((request) => handlePatch(request as NextRequest), 'admin')
 export const DELETE = withRateLimit((request) => handleDelete(request as NextRequest), 'admin')
+

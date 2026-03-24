@@ -57,6 +57,7 @@ export async function getRouteAuthContext(
   const req = {
     headers: {
       authorization: request.headers.get('authorization') ?? undefined,
+      cookie: request.headers.get('cookie') ?? undefined,
     },
   } as Request
 

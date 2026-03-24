@@ -6,6 +6,7 @@ import type { UserRole } from '@/types'
 export const ACCESS_TOKEN_EXPIRES_IN = '15m'
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60
 export const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
+export const ACCESS_TOKEN_COOKIE_NAME = 'token'
 export const REFRESH_TOKEN_COOKIE_NAME = 'refreshToken'
 
 export interface AuthenticatedUser {
@@ -73,6 +74,32 @@ function getBearerToken(authorizationHeader?: string | string[]): string | null 
   return token
 }
 
+function getCookieToken(
+  cookieHeader?: string | string[],
+  cookieName: string = ACCESS_TOKEN_COOKIE_NAME
+): string | null {
+  const header = Array.isArray(cookieHeader)
+    ? cookieHeader[0]
+    : cookieHeader
+
+  if (!header) {
+    return null
+  }
+
+  const cookies = header.split(';')
+
+  for (const cookie of cookies) {
+    const [rawName, ...rawValueParts] = cookie.trim().split('=')
+    if (rawName !== cookieName || rawValueParts.length === 0) {
+      continue
+    }
+
+    return rawValueParts.join('=')
+  }
+
+  return null
+}
+
 export function signAuthToken(user: AuthenticatedUser): string {
   return jwt.sign(user, getJwtSecret(), { expiresIn: ACCESS_TOKEN_EXPIRES_IN })
 }
@@ -115,6 +142,7 @@ export function getExpiredRefreshTokenCookieOptions() {
 
 export function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const token = getBearerToken(req.headers.authorization)
+    ?? getCookieToken(req.headers.cookie)
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication token required' })

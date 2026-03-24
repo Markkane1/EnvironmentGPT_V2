@@ -20,7 +20,6 @@ htmlcov/
 
 tests/playwright-results.json
 jest-results.json
-docs/
 next-dev.log
 server.log
 dev.log

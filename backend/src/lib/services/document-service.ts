@@ -36,6 +36,10 @@ type DocumentWhereInput = {
   }
 }
 
+const MAX_COLLECTION_PAGE_SIZE = 100
+const DEFAULT_COLLECTION_PAGE_SIZE = 10
+const MAX_CONTENT_PREVIEW_LENGTH = 500
+
 // ==================== Document Service Class ====================
 
 export class DocumentService {
@@ -144,6 +148,10 @@ export class DocumentService {
     pageSize: number = 10,
     ownerId?: string
   ): Promise<SearchResult> {
+    const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+    const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0
+      ? Math.min(Math.floor(pageSize), MAX_COLLECTION_PAGE_SIZE)
+      : DEFAULT_COLLECTION_PAGE_SIZE
     const where: DocumentWhereInput = { isActive: true }
 
     if (ownerId) {
@@ -168,8 +176,8 @@ export class DocumentService {
     const [documents, total] = await Promise.all([
       db.document.findMany({
         where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (normalizedPage - 1) * normalizedPageSize,
+        take: normalizedPageSize,
         orderBy: { createdAt: 'desc' }
       }),
       db.document.count({ where })
@@ -198,9 +206,9 @@ export class DocumentService {
     return {
       documents: filteredDocs.map(d => this.mapToDocument(d)),
       total,
-      page,
-      pageSize,
-      hasMore: total > page * pageSize
+      page: normalizedPage,
+      pageSize: normalizedPageSize,
+      hasMore: total > normalizedPage * normalizedPageSize
     }
   }
 
@@ -213,8 +221,11 @@ export class DocumentService {
     limit: number = 10,
     ownerId?: string
   ): Promise<SearchResult> {
+    const normalizedLimit = Number.isFinite(limit) && limit > 0
+      ? Math.min(Math.floor(limit), MAX_COLLECTION_PAGE_SIZE)
+      : DEFAULT_COLLECTION_PAGE_SIZE
     // Get base list
-    const baseResult = await this.listDocuments(filter, 1, 100, ownerId)
+    const baseResult = await this.listDocuments(filter, 1, MAX_COLLECTION_PAGE_SIZE, ownerId)
     
     // Score and sort by relevance
     const scored = baseResult.documents
@@ -224,13 +235,13 @@ export class DocumentService {
       }))
       .filter(s => s.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
+      .slice(0, normalizedLimit)
 
     return {
       documents: scored.map(s => s.doc),
       total: scored.length,
       page: 1,
-      pageSize: limit,
+      pageSize: normalizedLimit,
       hasMore: false
     }
   }
@@ -299,25 +310,49 @@ export class DocumentService {
     byCategory: Record<string, number>
     byYear: Record<number, number>
   }> {
-    const documents = await db.document.findMany({
-      where: { isActive: true },
-      select: { category: true, year: true }
-    })
+    const [total, categoryGroups, yearGroups] = await Promise.all([
+      db.document.count({
+        where: { isActive: true }
+      }),
+      db.document.groupBy({
+        by: ['category'],
+        where: {
+          isActive: true,
+          category: { not: null }
+        },
+        _count: {
+          category: true
+        }
+      }),
+      db.document.groupBy({
+        by: ['year'],
+        where: {
+          isActive: true,
+          year: { not: null }
+        },
+        _count: {
+          year: true
+        }
+      })
+    ])
 
     const byCategory: Record<string, number> = {}
     const byYear: Record<number, number> = {}
 
-    for (const doc of documents) {
-      if (doc.category) {
-        byCategory[doc.category] = (byCategory[doc.category] || 0) + 1
+    for (const group of categoryGroups) {
+      if (group.category) {
+        byCategory[group.category] = group._count.category
       }
-      if (doc.year) {
-        byYear[doc.year] = (byYear[doc.year] || 0) + 1
+    }
+
+    for (const group of yearGroups) {
+      if (group.year !== null) {
+        byYear[group.year] = group._count.year
       }
     }
 
     return {
-      total: documents.length,
+      total,
       byCategory,
       byYear
     }
@@ -363,24 +398,37 @@ export class DocumentService {
     }
   }
 
+  mapToDocumentSummary(doc: DocumentRecordLike): Document {
+    const mapped = this.mapToDocument(doc)
+
+    return {
+      ...mapped,
+      content: mapped.content.length > MAX_CONTENT_PREVIEW_LENGTH
+        ? mapped.content.slice(0, MAX_CONTENT_PREVIEW_LENGTH) + '...'
+        : mapped.content,
+      chunks: undefined
+    }
+  }
+
   private async createDocumentChunks(documentId: string, content: string): Promise<void> {
     const chunks = createChunks(content)
-    
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
-      await db.documentChunk.create({
-        data: {
-          documentId,
-          content: chunk.text,
-          chunkIndex: i,
-          metadata: JSON.stringify({
-            startPosition: chunk.startIndex,
-            endPosition: chunk.endIndex,
-            wordCount: chunk.text.split(/\s+/).length
-          })
-        }
-      })
+
+    if (chunks.length === 0) {
+      return
     }
+
+    await db.documentChunk.createMany({
+      data: chunks.map((chunk, index) => ({
+        documentId,
+        content: chunk.text,
+        chunkIndex: index,
+        metadata: JSON.stringify({
+          startPosition: chunk.startIndex,
+          endPosition: chunk.endIndex,
+          wordCount: chunk.text.split(/\s+/).length
+        })
+      }))
+    })
   }
 
   private async deleteDocumentChunks(documentId: string): Promise<void> {

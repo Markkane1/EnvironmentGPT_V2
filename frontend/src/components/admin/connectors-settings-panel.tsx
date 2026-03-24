@@ -26,6 +26,7 @@ import {
   TableRow
 } from '@/components/ui/table'
 import {
+  AlertCircle,
   CheckCircle,
   Plus,
   RefreshCw,
@@ -39,6 +40,8 @@ import {
   TestTube,
   XCircle
 } from 'lucide-react'
+import { getApiErrorMessage } from '@/lib/api-errors'
+import { toast } from '@/hooks/use-toast'
 
 interface DataConnector {
   id: string
@@ -81,6 +84,11 @@ const getDefaultFormData = () => ({
   topics: [{ topic: 'air_quality', priority: 100 }]
 })
 
+function normalizeOptionalString(value: string) {
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 const CONNECTOR_TYPES = [
   { value: 'aqi', label: 'Air Quality Index (AQI)', icon: Wind },
   { value: 'weather', label: 'Weather Data', icon: Cloud },
@@ -108,9 +116,13 @@ export function ConnectorsSettingsPanel() {
   const [connectors, setConnectors] = useState<DataConnector[]>([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<ConnectorStats | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConnector, setEditingConnector] = useState<DataConnector | null>(null)
   const [testingConnector, setTestingConnector] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isClearingCache, setIsClearingCache] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [testDetailResult, setTestDetailResult] = useState<{
     connectorName: string
     success: boolean
@@ -127,9 +139,13 @@ export function ConnectorsSettingsPanel() {
       const data = await response.json()
       if (data.success) {
         setConnectors(data.connectors)
+        setError(null)
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to load connectors'))
       }
     } catch (error) {
       console.error('Failed to fetch connectors:', error)
+      setError('Failed to load connectors')
     } finally {
       setLoading(false)
     }
@@ -141,9 +157,12 @@ export function ConnectorsSettingsPanel() {
       const data = await response.json()
       if (data.success) {
         setStats(data.stats)
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to load connector statistics'))
       }
     } catch (error) {
       console.error('Failed to fetch stats:', error)
+      setError('Failed to load connector statistics')
     }
   }
 
@@ -152,11 +171,21 @@ export function ConnectorsSettingsPanel() {
     fetchStats()
   }, [])
 
+  const refreshData = async () => {
+    setIsRefreshing(true)
+    try {
+      await Promise.all([fetchConnectors(), fetchStats()])
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
   const handleTest = async (connector: DataConnector) => {
     setTestingConnector(connector.id)
     try {
       const response = await fetch(`/api/admin/connectors?action=test&id=${connector.id}`)
       const data = await response.json()
+      setError(null)
       setTestDetailResult({
         connectorName: connector.displayName || connector.name,
         success: !!data.result?.success,
@@ -166,6 +195,7 @@ export function ConnectorsSettingsPanel() {
       })
     } catch (error) {
       console.error('Test failed:', error)
+      setError('Failed to test connector')
       setTestDetailResult({
         connectorName: connector.displayName || connector.name,
         success: false,
@@ -178,20 +208,40 @@ export function ConnectorsSettingsPanel() {
   }
 
   const handleClearCache = async () => {
+    setIsClearingCache(true)
     try {
       await fetch('/api/admin/connectors?action=clear-cache')
-      alert('Cache cleared successfully')
+      setError(null)
+      toast({
+        title: 'Cache cleared',
+        description: 'Connector cache was cleared successfully.'
+      })
     } catch (error) {
       console.error('Failed to clear cache:', error)
+      setError('Failed to clear connector cache')
+    } finally {
+      setIsClearingCache(false)
     }
   }
 
   const handleSubmit = async () => {
+    if (isSaving) {
+      return
+    }
+
+    setIsSaving(true)
     try {
+      const payload = {
+        ...formData,
+        apiKeyEnvVar: normalizeOptionalString(formData.apiKeyEnvVar),
+        responseMapping: normalizeOptionalString(formData.responseMapping),
+        injectionTemplate: normalizeOptionalString(formData.injectionTemplate),
+      }
+
       const response = await fetch('/api/admin/connectors', {
         method: editingConnector ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingConnector ? { id: editingConnector.id, ...formData } : formData)
+        body: JSON.stringify(editingConnector ? { id: editingConnector.id, ...payload } : payload)
       })
 
       const data = await response.json()
@@ -199,11 +249,16 @@ export function ConnectorsSettingsPanel() {
         setDialogOpen(false)
         setEditingConnector(null)
         setFormData(getDefaultFormData())
-        fetchConnectors()
-        fetchStats()
+        setError(null)
+        await Promise.all([fetchConnectors(), fetchStats()])
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to save connector'))
       }
     } catch (error) {
       console.error('Failed to save connector:', error)
+      setError('Failed to save connector')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -214,11 +269,15 @@ export function ConnectorsSettingsPanel() {
       const response = await fetch(`/api/admin/connectors?id=${id}`, { method: 'DELETE' })
       const data = await response.json()
       if (data.success) {
+        setError(null)
         fetchConnectors()
         fetchStats()
+      } else {
+        setError(getApiErrorMessage(data.error, 'Failed to delete connector'))
       }
     } catch (error) {
       console.error('Failed to delete connector:', error)
+      setError('Failed to delete connector')
     }
   }
 
@@ -229,10 +288,12 @@ export function ConnectorsSettingsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: connector.id, isActive: !connector.isActive })
       })
+      setError(null)
       fetchConnectors()
       fetchStats()
     } catch (error) {
       console.error('Failed to toggle connector:', error)
+      setError('Failed to update connector status')
     }
   }
 
@@ -288,7 +349,7 @@ export function ConnectorsSettingsPanel() {
   const getStatusBadge = (status: string | null) => {
     switch (status) {
       case 'success':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="mr-1 h-3 w-3" />Success</Badge>
+        return <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline"><CheckCircle className="mr-1 h-3 w-3" />Success</Badge>
       case 'error':
         return <Badge className="bg-red-100 text-red-800"><XCircle className="mr-1 h-3 w-3" />Error</Badge>
       default:
@@ -318,6 +379,16 @@ export function ConnectorsSettingsPanel() {
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <div
+          className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          role="alert"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
@@ -336,9 +407,9 @@ export function ConnectorsSettingsPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Active</p>
-                <p className="text-2xl font-bold text-green-600">{stats?.activeConnectors || 0}</p>
+                <p className="text-2xl font-bold text-teal-700">{stats?.activeConnectors || 0}</p>
               </div>
-              <Activity className="h-8 w-8 text-green-600" />
+              <Activity className="h-8 w-8 text-teal-600" />
             </div>
           </CardContent>
         </Card>
@@ -371,11 +442,13 @@ export function ConnectorsSettingsPanel() {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Data Connectors</h3>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { fetchConnectors(); fetchStats() }}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={refreshData} disabled={isRefreshing || isClearingCache}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button variant="outline" onClick={handleClearCache}>Clear Cache</Button>
+          <Button variant="outline" onClick={handleClearCache} disabled={isClearingCache || isRefreshing}>
+            {isClearingCache ? 'Clearing...' : 'Clear Cache'}
+          </Button>
           <Dialog
             open={dialogOpen}
             onOpenChange={(open) => {
@@ -534,8 +607,10 @@ export function ConnectorsSettingsPanel() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleSubmit}>{editingConnector ? 'Update' : 'Add'} Connector</Button>
+                <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
+                <Button onClick={handleSubmit} disabled={isSaving}>
+                  {isSaving ? 'Saving...' : `${editingConnector ? 'Update' : 'Add'} Connector`}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -553,7 +628,7 @@ export function ConnectorsSettingsPanel() {
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               {testDetailResult?.success ? (
-                <CheckCircle className="h-5 w-5 text-green-500" />
+                <CheckCircle className="h-5 w-5 text-teal-600" />
               ) : (
                 <XCircle className="h-5 w-5 text-red-500" />
               )}

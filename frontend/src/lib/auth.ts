@@ -1,3 +1,5 @@
+import { getConfiguredBackendUrl } from '@/lib/runtime-config'
+
 export interface AuthTokenPayload {
   userId: string
   role: string
@@ -148,7 +150,7 @@ export function clearAuthCookieOptions() {
 }
 
 export function getBackendUrl(): string {
-  return process.env.BACKEND_URL || 'http://localhost:3001'
+  return getConfiguredBackendUrl(process.env)
 }
 
 function escapeRegex(value: string): string {

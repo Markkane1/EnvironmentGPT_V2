@@ -35,7 +35,7 @@ export function SourcePanel({
   const [expandedSource, setExpandedSource] = useState<string | null>(null)
 
   const getConfidenceColor = (score: number) => {
-    if (score >= 0.8) return 'text-green-600 bg-green-50 border-green-200'
+    if (score >= 0.8) return 'text-teal-700 bg-teal-50 border-teal-200'
     if (score >= 0.6) return 'text-yellow-600 bg-yellow-50 border-yellow-200'
     return 'text-red-600 bg-red-50 border-red-200'
   }
@@ -95,7 +95,7 @@ export function SourcePanel({
         )}>
           <div className={cn(
             'w-2 h-2 rounded-full',
-            confidence >= 0.8 ? 'bg-green-500' : 
+            confidence >= 0.8 ? 'bg-teal-500' :
             confidence >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'
           )} />
           <span className="font-medium">{getConfidenceLabel(confidence)}</span>
@@ -113,8 +113,8 @@ export function SourcePanel({
               key={source.id || index}
               className={cn(
                 'cursor-pointer transition-all',
-                expandedSource === source.id 
-                  ? 'ring-2 ring-green-500' 
+                expandedSource === source.id
+                  ? 'ring-2 ring-teal-500'
                   : 'hover:shadow-md'
               )}
               onClick={() => setExpandedSource(
@@ -124,7 +124,7 @@ export function SourcePanel({
               <CardHeader className="p-3 pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2 flex-1 min-w-0">
-                    <FileText className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                    <FileText className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
                     <div className="min-w-0">
                       <CardTitle className="text-sm font-medium truncate">
                         {source.title}

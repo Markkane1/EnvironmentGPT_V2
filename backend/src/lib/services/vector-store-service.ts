@@ -101,7 +101,6 @@ export class VectorStoreService {
       }
 
       this.isLoaded = true
-      console.log(`Loaded ${this.index.size} chunks into vector index`)
     } catch (error) {
       console.error('Failed to load vector index:', error)
     }

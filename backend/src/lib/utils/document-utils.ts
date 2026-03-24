@@ -136,7 +136,20 @@ export function createChunks(
   chunkSize: number = 512, 
   overlap: number = 50
 ): { text: string; startIndex: number; endIndex: number }[] {
-  const words = content.split(/\s+/)
+  if (chunkSize <= 0) {
+    throw new Error('chunkSize must be greater than 0')
+  }
+
+  if (overlap < 0 || overlap >= chunkSize) {
+    throw new Error('overlap must be between 0 and chunkSize - 1')
+  }
+
+  const normalizedContent = content.trim()
+  if (!normalizedContent) {
+    return []
+  }
+
+  const words = normalizedContent.split(/\s+/)
   const chunks: { text: string; startIndex: number; endIndex: number }[] = []
   
   let startIndex = 0
@@ -204,8 +217,15 @@ export function calculateRelevanceScore(query: string, document: Document): numb
 // ==================== Text Similarity ====================
 
 export function simpleSimilarity(text1: string, text2: string): number {
-  const words1 = new Set(text1.toLowerCase().split(/\s+/))
-  const words2 = new Set(text2.toLowerCase().split(/\s+/))
+  const normalizedText1 = text1.trim()
+  const normalizedText2 = text2.trim()
+
+  if (!normalizedText1 || !normalizedText2) {
+    return 0
+  }
+
+  const words1 = new Set(normalizedText1.toLowerCase().split(/\s+/))
+  const words2 = new Set(normalizedText2.toLowerCase().split(/\s+/))
   
   const intersection = new Set([...words1].filter(x => words2.has(x)))
   const union = new Set([...words1, ...words2])

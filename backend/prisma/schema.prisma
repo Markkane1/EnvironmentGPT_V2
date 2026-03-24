@@ -31,6 +31,9 @@ model User {
   feedback     Feedback[]
   refreshTokens RefreshToken[]
   llmProvidersAdded LLMProvider[] @relation("AddedLLMProviders")
+
+  @@index([role])
+  @@index([isActive])
 }
 
 model RefreshToken {
@@ -78,8 +81,11 @@ model Document {
   
   @@index([ownerId])
   @@index([category])
+  @@index([reportSeries])
+  @@index([audience])
   @@index([year])
   @@index([isActive])
+  @@index([createdAt])
 }
 
 // ==================== Document Chunks for RAG ====================
@@ -115,6 +121,7 @@ model ChatSession {
   
   @@index([userId])
   @@index([documentId])
+  @@index([createdAt])
   @@index([updatedAt])
 }
 
@@ -133,6 +140,7 @@ model ChatMessage {
   feedback  Feedback[]
   
   @@index([sessionId])
+  @@index([role])
   @@index([createdAt])
 }
 
@@ -150,6 +158,7 @@ model Feedback {
   message   ChatMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   
   @@index([messageId])
+  @@index([userId])
   @@index([rating])
 }
 

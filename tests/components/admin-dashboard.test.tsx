@@ -2,6 +2,13 @@ import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { EnhancedAdminDashboard } from '@/components/admin/enhanced-dashboard'
 
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    refresh: jest.fn(),
+  }),
+}))
+
 jest.mock('@/components/admin/providers-settings-panel', () => ({
   ProvidersSettingsPanel: () => <div>Providers panel</div>,
 }))
@@ -19,16 +26,19 @@ const fetchMock = global.fetch as jest.Mock
 function mockDashboardFetches() {
   fetchMock
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         statistics: { documents: 4, sessions: 3, messages: 20, feedback: 2 },
       }),
     })
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         statistics: { sessionsToday: 2, sessionsWeek: 3, totalQueries: 20, avgResponseTime: 188 },
       }),
     })
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         statistics: {
           total: 4,
@@ -47,6 +57,7 @@ function mockDashboardFetches() {
       }),
     })
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         statistics: {
           total: 2,
@@ -65,6 +76,7 @@ function mockDashboardFetches() {
       }),
     })
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         health: {
           status: 'healthy',
@@ -74,6 +86,7 @@ function mockDashboardFetches() {
       }),
     })
     .mockResolvedValueOnce({
+      ok: true,
       json: async () => ({
         stats: { totalEntries: 1, hitRate: 0.5, memoryUsageMB: 1.2 },
       }),
@@ -151,18 +164,7 @@ describe('EnhancedAdminDashboard', () => {
       writable: true,
       value: jest.fn(),
     })
-    const clickSpy = jest.fn()
-    const originalCreateElement = document.createElement.bind(document)
-    const createElementSpy = jest.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
-      if (tagName === 'a') {
-        return {
-          click: clickSpy,
-          href: '',
-          download: '',
-        } as unknown as HTMLAnchorElement
-      }
-      return originalCreateElement(tagName)
-    })
+    const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -191,7 +193,7 @@ describe('EnhancedAdminDashboard', () => {
     expect(URL.createObjectURL).toHaveBeenCalled()
     expect(clickSpy).toHaveBeenCalled()
 
-    createElementSpy.mockRestore()
+    clickSpy.mockRestore()
   })
 
   it('deletes a managed document through the existing API and refreshes stats', async () => {
@@ -204,16 +206,19 @@ describe('EnhancedAdminDashboard', () => {
         json: async () => ({ success: true }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           statistics: { documents: 3, sessions: 3, messages: 20, feedback: 2 },
         }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           statistics: { sessionsToday: 2, sessionsWeek: 3, totalQueries: 20, avgResponseTime: 188 },
         }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           statistics: {
             total: 3,
@@ -224,6 +229,7 @@ describe('EnhancedAdminDashboard', () => {
         }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           statistics: {
             total: 2,
@@ -235,6 +241,7 @@ describe('EnhancedAdminDashboard', () => {
         }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           health: {
             status: 'healthy',
@@ -244,6 +251,7 @@ describe('EnhancedAdminDashboard', () => {
         }),
       })
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           stats: { totalEntries: 1, hitRate: 0.5, memoryUsageMB: 1.2 },
         }),
@@ -258,5 +266,21 @@ describe('EnhancedAdminDashboard', () => {
     )
 
     confirmSpy.mockRestore()
+  })
+
+  it('shows a visible dashboard alert when stats refresh fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: 'Stats unavailable' }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({})
+      })
+
+    render(<EnhancedAdminDashboard />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to refresh dashboard statistics/i)
   })
 })

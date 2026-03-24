@@ -2,10 +2,10 @@
 
 import { Sidebar } from '@/components/chat/sidebar'
 import { EnhancedChatInterface } from '@/components/chat/enhanced-chat-interface'
+import { APP_CONFIG } from '@/lib/constants'
 import { useChatStore } from '@/lib/store'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Menu, ExternalLink } from 'lucide-react'
+import { Menu, ExternalLink, ShieldCheck } from 'lucide-react'
 
 export default function Home() {
   const { toggleSidebar, sidebarOpen } = useChatStore()
@@ -15,44 +15,50 @@ export default function Home() {
       <Sidebar />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b bg-white px-4 py-3">
+        <header className="border-b bg-white px-4 py-2.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                aria-label="Toggle sidebar"
+                className="h-8 w-8 text-gray-500 hover:text-gray-700"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
               {!sidebarOpen && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleSidebar}
-                  aria-label="Toggle sidebar"
-                >
-                  <Menu className="w-4 h-4" />
-                </Button>
+                <span className="hidden text-sm font-medium text-gray-700 sm:inline">
+                  EPA Punjab · EnvironmentGPT
+                </span>
               )}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">Model:</span>
-                <Badge variant="secondary" className="font-mono text-xs">
-                  RAG + LLM
-                </Badge>
-              </div>
-              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                Phase 6 Complete
-              </Badge>
             </div>
 
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" asChild>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-gray-500 hover:text-gray-700"
+                asChild
+              >
                 <a
-                  href="https://epunjab.gov.pk/epa"
+                  href={APP_CONFIG.organizationUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="gap-1"
                 >
-                  <ExternalLink className="w-3 h-3" />
+                  <ExternalLink className="h-3.5 w-3.5" />
                   EPA Punjab
                 </a>
               </Button>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/admin" className="gap-1">
+              <div className="h-4 w-px bg-gray-200" />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                asChild
+              >
+                <a href="/admin">
+                  <ShieldCheck className="h-3.5 w-3.5" />
                   Admin
                 </a>
               </Button>

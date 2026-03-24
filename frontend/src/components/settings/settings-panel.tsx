@@ -15,14 +15,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { 
-  Settings, 
-  Moon, 
-  Sun, 
-  Download, 
-  Trash2, 
+import {
+  Settings,
+  Moon,
+  Sun,
+  Download,
+  Trash2,
   Database,
-  Check
+  Check,
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { AppSettings, defaultAppSettings, useAppSettingsStore } from '@/lib/app-settings'
@@ -32,17 +32,22 @@ export function SettingsPanel() {
   const setPersistedSettings = useAppSettingsStore((state) => state.setSettings)
   const resetPersistedSettings = useAppSettingsStore((state) => state.resetSettings)
   const [settings, setSettings] = useState<AppSettings>(persistedSettings)
+  const [hasLocalEdits, setHasLocalEdits] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    setSettings(persistedSettings)
-  }, [persistedSettings])
+    if (!hasLocalEdits) {
+      setSettings(persistedSettings)
+    }
+  }, [hasLocalEdits, persistedSettings])
 
   const saveSettings = async () => {
     setIsSaving(true)
     try {
       setPersistedSettings(settings)
+      setHasLocalEdits(false)
       setSaved(true)
       toast({
         title: 'Settings saved',
@@ -62,11 +67,26 @@ export function SettingsPanel() {
 
   // Update setting
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setHasLocalEdits(true)
     setSettings(prev => ({ ...prev, [key]: value }))
+  }
+
+  const updateMaxHistoryItems = (rawValue: string) => {
+    const parsedValue = Number.parseInt(rawValue, 10)
+    const nextValue = Number.isFinite(parsedValue)
+      ? Math.min(50, Math.max(1, parsedValue))
+      : defaultAppSettings.maxHistoryItems
+
+    updateSetting('maxHistoryItems', nextValue)
   }
 
   // Export data
   const exportData = async () => {
+    if (isExporting) {
+      return
+    }
+
+    setIsExporting(true)
     try {
       const response = await fetch('/api/export?type=stats&format=json')
       if (!response.ok) {
@@ -90,6 +110,8 @@ export function SettingsPanel() {
         description: 'Could not export data',
         variant: 'destructive'
       })
+    } finally {
+      setIsExporting(false)
     }
   }
 
@@ -102,6 +124,7 @@ export function SettingsPanel() {
       localStorage.removeItem('epa-document-storage')
       resetPersistedSettings()
       setSettings(defaultAppSettings)
+      setHasLocalEdits(false)
       toast({
         title: 'Data cleared',
         description: 'All local data has been removed.'
@@ -113,24 +136,17 @@ export function SettingsPanel() {
     <div className="max-w-2xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Settings className="w-6 h-6" />
-            Settings
-          </h1>
-          <p className="text-gray-500">Manage your preferences and application settings</p>
+          <h1 className="text-xl font-semibold text-gray-900">Preferences</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Manage your application settings</p>
         </div>
-        <Button 
-          onClick={saveSettings} 
-          disabled={isSaving}
-          className="bg-green-600 hover:bg-green-700"
-        >
+        <Button onClick={saveSettings} disabled={isSaving}>
           {saved ? (
             <>
               <Check className="w-4 h-4 mr-2" />
               Saved
             </>
           ) : isSaving ? (
-            'Saving...'
+            'Saving…'
           ) : (
             'Save Changes'
           )}
@@ -191,7 +207,7 @@ export function SettingsPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Database className="w-5 h-5 text-purple-600" />
+            <Database className="w-5 h-5 text-teal-700" />
             Chat & History
           </CardTitle>
           <CardDescription>
@@ -219,7 +235,9 @@ export function SettingsPanel() {
             <Input
               type="number"
               value={settings.maxHistoryItems}
-              onChange={(e) => updateSetting('maxHistoryItems', Math.min(50, Math.max(1, parseInt(e.target.value) || 10)))}
+              inputMode="numeric"
+              onChange={(event) => updateMaxHistoryItems(event.target.value)}
+              onInput={(event) => updateMaxHistoryItems(event.currentTarget.value)}
               min={1}
               max={50}
             />
@@ -249,9 +267,9 @@ export function SettingsPanel() {
                 Download your usage statistics as JSON
               </p>
             </div>
-            <Button variant="outline" onClick={exportData}>
+            <Button variant="outline" onClick={exportData} disabled={isExporting}>
               <Download className="w-4 h-4 mr-2" />
-              Export
+              {isExporting ? 'Exporting...' : 'Export'}
             </Button>
           </div>
           
@@ -277,10 +295,7 @@ export function SettingsPanel() {
         <CardContent className="py-4">
           <div className="flex items-center justify-between text-sm text-gray-500">
             <span>EPA Punjab EnvironmentGPT</span>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">v2.0.0</Badge>
-              <Badge className="bg-green-100 text-green-700">Phase 6-7</Badge>
-            </div>
+            <Badge variant="secondary">v2.0.0</Badge>
           </div>
         </CardContent>
       </Card>

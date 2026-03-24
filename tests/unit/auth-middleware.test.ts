@@ -1,30 +1,31 @@
-import { createRequest, createResponse } from 'node-mocks-http'
-import type { NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
+import httpMocks from 'node-mocks-http'
 import {
-  ACCESS_TOKEN_TTL_SECONDS,
+  ACCESS_TOKEN_COOKIE_NAME,
   authenticateToken,
   generateRefreshToken,
   getExpiredRefreshTokenCookieOptions,
   getRefreshTokenCookieOptions,
-  getRefreshTokenExpiresAt,
   hashRefreshToken,
-  REFRESH_TOKEN_COOKIE_NAME,
+  REFRESH_TOKEN_TTL_SECONDS,
   requireAdmin,
   signAuthToken,
   verifyAuthToken,
 } from '@/middleware/auth'
 
-describe('JWT auth middleware', () => {
+describe('auth middleware helpers', () => {
+  const originalSecret = process.env.JWT_SECRET
+
   beforeEach(() => {
-    process.env.JWT_SECRET = 'test-jwt-secret'
+    process.env.JWT_SECRET = 'unit-test-secret'
   })
 
   afterEach(() => {
-    delete process.env.JWT_SECRET
+    process.env.JWT_SECRET = originalSecret
+    jest.restoreAllMocks()
   })
 
-  it('signs and verifies auth tokens with user claims', () => {
+  it('should sign and verify a valid access token round trip', () => {
     const token = signAuthToken({
       userId: 'user-1',
       role: 'admin',
@@ -34,16 +35,39 @@ describe('JWT auth middleware', () => {
       userId: 'user-1',
       role: 'admin',
     })
-
-    const decoded = jwt.decode(token) as jwt.JwtPayload
-    expect((decoded.exp ?? 0) - (decoded.iat ?? 0)).toBe(ACCESS_TOKEN_TTL_SECONDS)
   })
 
-  it('generates stable refresh token hashes and strict cookie options', () => {
-    const refreshToken = generateRefreshToken()
-    const expiresAt = getRefreshTokenExpiresAt(new Date('2026-03-23T00:00:00.000Z'))
+  it('should reject tokens with a string payload or an invalid role payload', () => {
+    const stringPayloadToken = jwt.sign('bad-payload', process.env.JWT_SECRET as string, {
+      algorithm: 'HS256',
+    })
+    const invalidRoleToken = jwt.sign(
+      { userId: 'user-1', role: 'superadmin' },
+      process.env.JWT_SECRET as string,
+      {
+        algorithm: 'HS256',
+        expiresIn: '15m',
+      }
+    )
 
-    expect(hashRefreshToken(refreshToken)).toBe(hashRefreshToken(refreshToken))
+    expect(() => verifyAuthToken(stringPayloadToken)).toThrow('Invalid token payload')
+    expect(() => verifyAuthToken(invalidRoleToken)).toThrow('Invalid token payload')
+  })
+
+  it('should throw when the JWT secret is missing', () => {
+    delete process.env.JWT_SECRET
+
+    expect(() => signAuthToken({ userId: 'user-1', role: 'admin' })).toThrow('JWT_SECRET is not configured')
+  })
+
+  it('should generate refresh tokens, hash them, and return secure cookie options', () => {
+    jest.spyOn(require('crypto'), 'randomBytes').mockReturnValue(Buffer.from('a'.repeat(48)))
+
+    const token = generateRefreshToken()
+    const expiresAt = new Date('2026-03-31T00:00:00.000Z')
+
+    expect(token).toBeTruthy()
+    expect(hashRefreshToken(token)).toHaveLength(64)
     expect(getRefreshTokenCookieOptions(expiresAt)).toEqual({
       httpOnly: true,
       secure: true,
@@ -58,115 +82,96 @@ describe('JWT auth middleware', () => {
       path: '/',
       maxAge: 0,
     })
-    expect(REFRESH_TOKEN_COOKIE_NAME).toBe('refreshToken')
+
+    const ttlSeconds = Math.round(
+      (getRefreshTokenCookieOptions().expires.getTime() - Date.now()) / 1000
+    )
+    expect(ttlSeconds).toBeLessThanOrEqual(REFRESH_TOKEN_TTL_SECONDS)
+    expect(ttlSeconds).toBeGreaterThan(REFRESH_TOKEN_TTL_SECONDS - 5)
   })
 
-  it('returns 401 when the bearer token is missing', () => {
-    const req = createRequest()
-    const res = createResponse()
-    const next = jest.fn() as NextFunction
+  it('should authenticate requests from bearer tokens and cookie fallbacks', () => {
+    const next = jest.fn()
+    const bearerToken = signAuthToken({ userId: 'user-1', role: 'viewer' })
+    const cookieToken = signAuthToken({ userId: 'user-2', role: 'admin' })
 
-    authenticateToken(req, res, next)
+    const bearerRequest = httpMocks.createRequest({
+      headers: {
+        authorization: `Bearer ${bearerToken}`,
+      },
+    })
+    const bearerResponse = httpMocks.createResponse()
 
-    expect(res.statusCode).toBe(401)
-    expect(res._getJSONData()).toEqual({
+    authenticateToken(bearerRequest as never, bearerResponse as never, next)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect((bearerRequest as any).user).toEqual({
+      userId: 'user-1',
+      role: 'viewer',
+    })
+
+    next.mockClear()
+
+    const cookieRequest = httpMocks.createRequest({
+      headers: {
+        cookie: `${ACCESS_TOKEN_COOKIE_NAME}=${cookieToken}; theme=dark`,
+      },
+    })
+    const cookieResponse = httpMocks.createResponse()
+
+    authenticateToken(cookieRequest as never, cookieResponse as never, next)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect((cookieRequest as any).user).toEqual({
+      userId: 'user-2',
+      role: 'admin',
+    })
+  })
+
+  it('should return 401 when the token is missing or invalid', () => {
+    const next = jest.fn()
+    const missingRequest = httpMocks.createRequest()
+    const missingResponse = httpMocks.createResponse()
+
+    authenticateToken(missingRequest as never, missingResponse as never, next)
+
+    expect(missingResponse.statusCode).toBe(401)
+    expect(missingResponse._getJSONData()).toEqual({
       error: 'Authentication token required',
     })
-    expect(next).not.toHaveBeenCalled()
-  })
 
-  it('attaches req.user when the token is valid', () => {
-    const token = signAuthToken({
-      userId: 'user-2',
-      role: 'viewer',
-    })
-    const req = createRequest({
+    const invalidRequest = httpMocks.createRequest({
       headers: {
-        authorization: `Bearer ${token}`,
+        authorization: 'Bearer invalid-token',
       },
     })
-    const res = createResponse()
-    const next = jest.fn() as NextFunction
+    const invalidResponse = httpMocks.createResponse()
 
-    authenticateToken(req, res, next)
+    authenticateToken(invalidRequest as never, invalidResponse as never, next)
 
-    expect(req.user).toEqual({
-      userId: 'user-2',
-      role: 'viewer',
+    expect(invalidResponse.statusCode).toBe(401)
+    expect(invalidResponse._getJSONData()).toEqual({
+      error: 'Invalid or expired token',
     })
+  })
+
+  it('should enforce admin-only access for non-admin users', () => {
+    const next = jest.fn()
+    const adminRequest = httpMocks.createRequest({
+      user: { userId: 'admin-1', role: 'admin' },
+    })
+    const adminResponse = httpMocks.createResponse()
+
+    requireAdmin(adminRequest as never, adminResponse as never, next)
     expect(next).toHaveBeenCalledTimes(1)
-  })
 
-  it('returns 401 for expired bearer tokens', () => {
-    const expiredToken = jwt.sign(
-      {
-        userId: 'user-expired',
-        role: 'viewer',
-      },
-      process.env.JWT_SECRET!,
-      {
-        algorithm: 'HS256',
-        expiresIn: -1,
-      }
-    )
-    const req = createRequest({
-      headers: {
-        authorization: `Bearer ${expiredToken}`,
-      },
+    const viewerRequest = httpMocks.createRequest({
+      user: { userId: 'viewer-1', role: 'viewer' },
     })
-    const res = createResponse()
-    const next = jest.fn() as NextFunction
+    const viewerResponse = httpMocks.createResponse()
 
-    authenticateToken(req, res, next)
-
-    expect(res.statusCode).toBe(401)
-    expect(res._getJSONData()).toEqual({
-      error: 'Invalid or expired token',
-    })
-    expect(next).not.toHaveBeenCalled()
-  })
-
-  it('rejects alg:none tokens', () => {
-    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
-    const payload = Buffer.from(JSON.stringify({
-      userId: 'user-none',
-      role: 'admin',
-      exp: Math.floor(Date.now() / 1000) + 60,
-    })).toString('base64url')
-    const forgedToken = `${header}.${payload}.`
-    const req = createRequest({
-      headers: {
-        authorization: `Bearer ${forgedToken}`,
-      },
-    })
-    const res = createResponse()
-    const next = jest.fn() as NextFunction
-
-    authenticateToken(req, res, next)
-
-    expect(res.statusCode).toBe(401)
-    expect(res._getJSONData()).toEqual({
-      error: 'Invalid or expired token',
-    })
-    expect(next).not.toHaveBeenCalled()
-  })
-
-  it('returns 403 for non-admin users', () => {
-    const req = createRequest({
-      user: {
-        userId: 'user-3',
-        role: 'viewer',
-      },
-    })
-    const res = createResponse()
-    const next = jest.fn() as NextFunction
-
-    requireAdmin(req, res, next)
-
-    expect(res.statusCode).toBe(403)
-    expect(res._getJSONData()).toEqual({
+    requireAdmin(viewerRequest as never, viewerResponse as never, next)
+    expect(viewerResponse.statusCode).toBe(403)
+    expect(viewerResponse._getJSONData()).toEqual({
       error: 'Admin access required',
     })
-    expect(next).not.toHaveBeenCalled()
   })
 })

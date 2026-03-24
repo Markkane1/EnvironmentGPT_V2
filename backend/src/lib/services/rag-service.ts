@@ -173,30 +173,48 @@ ${context}
   ): Promise<SourceReference[]> {
     const sources: SourceReference[] = []
     const seenDocuments = new Set<string>()
+    const rankedChunks = chunks
+      .map((chunk, index) => ({ chunk, index }))
+      .filter(({ chunk }) => !!chunk.documentId)
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
+    const uniqueDocumentIds = Array.from(new Set(
+      rankedChunks
+        .map(({ chunk }) => chunk.documentId)
+        .filter((documentId): documentId is string => typeof documentId === 'string')
+    )).slice(0, 5)
+
+    if (uniqueDocumentIds.length === 0) {
+      return sources
+    }
+
+    let documentsById = new Map<string, { id: string; title: string; category: string | null }>()
+
+    try {
+      const documents = await db.document.findMany({
+        where: { id: { in: uniqueDocumentIds } },
+        select: { id: true, title: true, category: true }
+      })
+
+      documentsById = new Map(documents.map((document) => [document.id, document]))
+    } catch (error) {
+      console.error('Failed to fetch source documents:', error)
+      return sources
+    }
+
+    for (const { chunk, index } of rankedChunks) {
       if (!chunk.documentId || seenDocuments.has(chunk.documentId)) continue
 
-      try {
-        const document = await db.document.findUnique({
-          where: { id: chunk.documentId },
-          select: { id: true, title: true, category: true }
+      const document = documentsById.get(chunk.documentId)
+      if (document) {
+        seenDocuments.add(chunk.documentId)
+        sources.push({
+          id: document.id,
+          documentId: document.id,
+          title: document.title,
+          category: document.category || undefined,
+          relevanceScore: scores[index] || 0,
+          excerpt: chunk.content.slice(0, 200) + '...'
         })
-
-        if (document) {
-          seenDocuments.add(chunk.documentId)
-          sources.push({
-            id: document.id,
-            documentId: document.id,
-            title: document.title,
-            category: document.category || undefined,
-            relevanceScore: scores[i] || 0,
-            excerpt: chunk.content.slice(0, 200) + '...'
-          })
-        }
-      } catch (error) {
-        console.error('Failed to fetch document:', error)
       }
 
       if (sources.length >= 5) break // Limit to 5 sources

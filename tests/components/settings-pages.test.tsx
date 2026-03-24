@@ -66,11 +66,11 @@ describe('SettingsPanel', () => {
     expect(useAppSettingsStore.getState().settings.maxHistoryItems).toBe(5)
 
     fetchMock.mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ success: true, sessions: [] }),
     })
 
-    render(<Sidebar />)
-
+    render(<Sidebar initialTab="history" />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions?limit=5'))
   })
 
@@ -118,5 +118,25 @@ describe('SettingsPanel', () => {
       expect(document.documentElement.classList.contains('dark')).toBe(true)
       expect(document.documentElement.dataset.theme).toBe('dark')
     })
+  })
+
+  it('shows an exporting state while the export request is in flight', async () => {
+    let resolveExport: ((value: unknown) => void) | undefined
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveExport = resolve
+    }))
+
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^export$/i }))
+
+    expect(await screen.findByRole('button', { name: /exporting/i })).toBeDisabled()
+
+    resolveExport?.({
+      ok: true,
+      blob: async () => new Blob(['{}'], { type: 'application/json' }),
+    })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^export$/i })).toBeEnabled())
   })
 })

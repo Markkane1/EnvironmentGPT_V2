@@ -685,6 +685,7 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
   async updateConnector(
     id: string,
     updates: Partial<{
+      name: string
       displayName: string
       endpointUrl: string
       apiKeyEnvVar: string
@@ -699,11 +700,23 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
       cacheEnabled: boolean
       cacheTtlSec: number
       isActive: boolean
+      topics: Array<{ topic: string; priority?: number }>
     }>
   ): Promise<DataConnectorConfig | null> {
+    const { topics, ...connectorUpdates } = updates
     const connector = await db.dataConnector.update({
       where: { id },
-      data: updates,
+      data: {
+        ...connectorUpdates,
+        topicMappings: topics ? {
+          deleteMany: {},
+          create: topics.map((mapping) => ({
+            topic: mapping.topic,
+            priority: mapping.priority || 100,
+            isActive: true,
+          })),
+        } : undefined,
+      },
       include: { topicMappings: true }
     })
 

@@ -137,31 +137,46 @@ async function getChatStats() {
 }
 
 async function getFeedbackStats() {
-  const [allFeedback, recentFeedback] = await Promise.all([
-    db.feedback.findMany(),
+  const [feedbackCount, feedbackAverage, feedbackDistribution, recentFeedback] = await Promise.all([
+    db.feedback.count(),
+    db.feedback.aggregate({
+      _avg: {
+        rating: true,
+      },
+    }),
+    db.feedback.groupBy({
+      by: ['rating'],
+      _count: {
+        rating: true,
+      },
+    }),
     db.feedback.findMany({
       orderBy: { createdAt: 'desc' },
       take: 5,
     }),
   ])
 
-  const avgRating = allFeedback.length > 0
-    ? allFeedback.reduce((sum, feedback) => sum + feedback.rating, 0) / allFeedback.length
-    : 0
+  const avgRating = feedbackAverage._avg.rating || 0
 
   const ratingDistribution: Record<number, number> = {}
   for (let i = 1; i <= 5; i++) {
-    ratingDistribution[i] = allFeedback.filter(feedback => feedback.rating === i).length
+    ratingDistribution[i] = 0
   }
+
+  for (const group of feedbackDistribution) {
+    ratingDistribution[group.rating] = group._count.rating
+  }
+
+  const positiveFeedbackCount = (ratingDistribution[4] || 0) + (ratingDistribution[5] || 0)
 
   return NextResponse.json({
     success: true,
     statistics: {
-      total: allFeedback.length,
+      total: feedbackCount,
       avgRating: Math.round(avgRating * 10) / 10,
       ratingDistribution,
-      positiveRate: allFeedback.length > 0
-        ? Math.round((allFeedback.filter(feedback => feedback.rating >= 4).length / allFeedback.length) * 100)
+      positiveRate: feedbackCount > 0
+        ? Math.round((positiveFeedbackCount / feedbackCount) * 100)
         : 0,
       recentFeedback: recentFeedback.map((feedback) => ({
         id: feedback.id,

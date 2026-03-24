@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
   Send,
   Bot,
@@ -330,42 +330,38 @@ export function EnhancedChatInterface() {
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         {messages.length === 0 && (
-          <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-            <div className="mb-6 flex items-center gap-3">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-600 shadow-lg">
-                <Leaf className="h-8 w-8 text-white" />
-              </div>
-              <div className="text-left">
-                <h1 className="text-2xl font-bold text-gray-900">EPA Punjab</h1>
-                <p className="text-gray-600">Environmental Knowledge Assistant</p>
-              </div>
+          <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 text-center">
+            {/* Brand lockup */}
+            <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg">
+              <Leaf className="h-8 w-8 text-white" />
             </div>
+            <h1 className="mb-1 text-3xl font-bold tracking-tight text-gray-900">EPA Punjab</h1>
+            <p className="mb-2 text-base font-medium text-teal-700">Environmental Knowledge Assistant</p>
+            <p className="mb-7 max-w-md text-sm leading-relaxed text-gray-500">
+              Ask questions about air quality, water resources, biodiversity, climate change,
+              and environmental regulations in Punjab, Pakistan.
+            </p>
 
-            <div className="mb-8 max-w-xl">
-              <p className="mb-2 text-gray-600">
-                Ask questions about environmental issues in Punjab, Pakistan.
-                Get information on air quality, water resources, biodiversity,
-                climate change, and environmental regulations.
+            {/* Suggested questions */}
+            <div className="w-full max-w-3xl">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Try asking about
               </p>
-              <Badge variant="secondary" className="text-xs">
-                Phase 6 - Enhanced RAG with Confidence Scoring
-              </Badge>
-            </div>
-
-            <div className="grid w-full max-w-3xl grid-cols-1 gap-3 md:grid-cols-2">
-              {SUGGESTED_QUESTIONS.map((category, categoryIndex) => (
-                category.questions.slice(0, 2).map((question, questionIndex) => (
-                  <Button
-                    key={`${categoryIndex}-${questionIndex}`}
-                    variant="outline"
-                    className="h-auto justify-start px-4 py-3 text-left transition-colors hover:border-green-300 hover:bg-green-50"
-                    onClick={() => handleSuggestedQuestion(question)}
-                  >
-                    <Sparkles className="mr-2 h-4 w-4 shrink-0 text-green-600" />
-                    <span className="line-clamp-2 text-sm">{question}</span>
-                  </Button>
-                ))
-              ))}
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {SUGGESTED_QUESTIONS.map((category, categoryIndex) => (
+                  category.questions.slice(0, 2).map((question, questionIndex) => (
+                    <Button
+                      key={`${categoryIndex}-${questionIndex}`}
+                      variant="outline"
+                      className="h-auto justify-start px-4 py-3 text-left transition-colors hover:border-teal-300 hover:bg-teal-50 hover:text-teal-900"
+                      onClick={() => handleSuggestedQuestion(question)}
+                    >
+                      <Sparkles className="mr-2 h-4 w-4 shrink-0 text-teal-500" />
+                      <span className="line-clamp-2 text-sm">{question}</span>
+                    </Button>
+                  ))
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -394,7 +390,7 @@ export function EnhancedChatInterface() {
               ))}
               {isLoading && !isStreaming && (
                 <div className="flex items-start gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-600">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-600 to-emerald-700">
                     <Bot className="h-4 w-4 text-white" />
                   </div>
                   <div className="flex items-center gap-2 rounded-2xl rounded-tl-none bg-gray-100 px-4 py-3 text-gray-500">
@@ -407,66 +403,67 @@ export function EnhancedChatInterface() {
           </ScrollArea>
         )}
 
-        <div className="border-t bg-white p-4">
+        <div className="border-t bg-white px-4 pb-4 pt-3">
           <div className="mx-auto max-w-4xl">
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask about environmental issues in Punjab..."
-                  className="min-h-[44px] max-h-32 resize-none pr-10 focus:border-transparent focus:ring-2 focus:ring-green-500"
-                  rows={1}
-                  disabled={isLoading}
-                />
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask about environmental issues in Punjab…"
+                className="min-h-[44px] max-h-32 flex-1 resize-none"
+                rows={1}
+                disabled={isLoading}
+              />
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <Button
+                  onClick={handleSubmit}
+                  disabled={!input.trim() || isLoading}
+                  className="h-[44px] w-11 px-0"
+                  aria-label="Send message"
+                >
+                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
                 {messages.length > 0 && (
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-xs text-gray-400 hover:text-teal-700"
                     onClick={() => {
                       clearMessages()
                       setActiveSources([])
                       setShowSourcePanel(false)
                       setLastConfidence(0)
                     }}
-                    title="New chat"
                     aria-label="Start new chat"
                   >
-                    <MessageSquarePlus className="h-4 w-4 text-gray-400" />
+                    <MessageSquarePlus className="h-3.5 w-3.5" />
+                    New chat
+                  </Button>
+                )}
+                {showSources && activeSources.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowSourcePanel(!showSourcePanel)}
+                    className={cn(
+                      'h-7 gap-1.5 px-2 text-xs text-gray-400 hover:text-teal-700',
+                      showSourcePanel && 'text-teal-700'
+                    )}
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    {activeSources.length} source{activeSources.length !== 1 ? 's' : ''}
                   </Button>
                 )}
               </div>
-              <Button
-                onClick={handleSubmit}
-                disabled={!input.trim() || isLoading}
-                className="h-11 min-w-11 shrink-0 bg-green-600 px-4 hover:bg-green-700"
-                aria-label="Send message"
-              >
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
-              {showSources && activeSources.length > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={() => setShowSourcePanel(!showSourcePanel)}
-                  className={cn('shrink-0', showSourcePanel && 'border-green-300 bg-green-50')}
-                >
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  Sources
-                  <Badge variant="secondary" className="ml-2">
-                    {activeSources.length}
-                  </Badge>
-                </Button>
-              )}
-            </div>
-            <div className="mt-2 flex items-center justify-between">
               <p className="text-xs text-gray-400">
-                EPA Punjab Environmental Assistant - RAG-powered responses with source attribution
-              </p>
-              <p className="text-xs text-gray-400">
-                Enter to send - Shift+Enter for new line
+                Enter to send · Shift+Enter for new line
               </p>
             </div>
           </div>
@@ -487,6 +484,7 @@ export function EnhancedChatInterface() {
         <SheetContent side="right" className="w-80 p-0 lg:hidden">
           <SheetHeader className="sr-only">
             <SheetTitle>Source Documents</SheetTitle>
+            <SheetDescription>Supporting knowledge-base documents for the current response.</SheetDescription>
           </SheetHeader>
           <SourcePanel
             sources={activeSources}
@@ -536,7 +534,7 @@ function EnhancedMessageBubble({
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div className={cn(
         'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-        isUser ? 'bg-gray-200' : 'bg-gradient-to-br from-green-500 to-emerald-600'
+        isUser ? 'bg-gray-200' : 'bg-gradient-to-br from-teal-600 to-emerald-700'
       )}>
         {isUser ? <User className="h-4 w-4 text-gray-600" /> : <Bot className="h-4 w-4 text-white" />}
       </div>
@@ -544,7 +542,7 @@ function EnhancedMessageBubble({
       <div className={cn('flex-1 max-w-[80%]', isUser && 'text-right')}>
         <div className={cn(
           'inline-block rounded-2xl px-4 py-3 text-sm',
-          isUser ? 'rounded-tr-none bg-green-600 text-white' : 'rounded-tl-none bg-gray-100 text-gray-800'
+          isUser ? 'rounded-tr-none bg-teal-700 text-white' : 'rounded-tl-none bg-gray-100 text-gray-800'
         )}>
           {isUser ? (
             <p>{message.content}</p>
@@ -552,7 +550,7 @@ function EnhancedMessageBubble({
             <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:mb-1 prose-headings:mt-2">
               <SimpleMarkdown>{message.content}</SimpleMarkdown>
               {showStreamingCursor && (
-                <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-green-600 align-middle" />
+                <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-teal-600 align-middle" />
               )}
             </div>
           )}
@@ -563,7 +561,7 @@ function EnhancedMessageBubble({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-gray-500 hover:text-green-600"
+              className="h-7 px-2 text-xs text-gray-500 hover:text-teal-700"
               onClick={onViewSources}
             >
               <BookOpen className="mr-1 h-3 w-3" />
@@ -581,7 +579,7 @@ function EnhancedMessageBubble({
               className="h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
               onClick={onCopy}
             >
-              {copied ? <Check className="mr-1 h-3 w-3 text-green-600" /> : <Copy className="mr-1 h-3 w-3" />}
+              {copied ? <Check className="mr-1 h-3 w-3 text-teal-600" /> : <Copy className="mr-1 h-3 w-3" />}
               {copied ? 'Copied' : 'Copy'}
             </Button>
 
@@ -601,7 +599,7 @@ function EnhancedMessageBubble({
                   size="sm"
                   className={cn(
                     'h-6 px-2 text-xs',
-                    helpfulSelected ? 'bg-green-50 text-green-700 hover:text-green-700' : 'text-gray-500 hover:text-green-600'
+                    helpfulSelected ? 'bg-teal-50 text-teal-700 hover:text-teal-700' : 'text-gray-500 hover:text-teal-600'
                   )}
                   onClick={() => onFeedback(5)}
                   disabled={feedbackLoading || feedbackSubmitted}

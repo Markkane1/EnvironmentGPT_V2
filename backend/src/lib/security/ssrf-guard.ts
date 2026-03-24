@@ -43,6 +43,16 @@ const PROVIDER_ALWAYS_BLOCKED_HOSTNAMES = new Set([
   'metadata.google.internal',
   '169.254.169.254',
 ])
+const PRIVATE_PROVIDER_HOSTNAME_SUFFIXES = [
+  '.internal',
+  '.local',
+  '.localhost',
+  '.localdomain',
+  '.home',
+  '.lan',
+  '.docker',
+  '.test',
+]
 
 function normalizeHost(hostname: string): string {
   return hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '').split('%')[0]
@@ -90,6 +100,24 @@ function isBlockedIpAddress(hostname: string): boolean {
   }
 
   return false
+}
+
+function allowsPrivateProviderUrls(): boolean {
+  return process.env.ALLOW_PRIVATE_PROVIDER_URLS === '1'
+}
+
+function isPrivateProviderHostname(hostname: string): boolean {
+  const normalized = normalizeHost(hostname)
+
+  if (BLOCKED_HOSTNAMES.has(normalized) || isBlockedIpAddress(normalized)) {
+    return true
+  }
+
+  if (!normalized.includes('.')) {
+    return true
+  }
+
+  return PRIVATE_PROVIDER_HOSTNAME_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
 }
 
 async function resolveHostname(hostname: string): Promise<string[] | null> {
@@ -162,6 +190,10 @@ export function validateProviderBaseUrl(rawUrl: string): string | null {
 
   if (PROVIDER_ALWAYS_BLOCKED_HOSTNAMES.has(hostname)) {
     return `URL hostname "${hostname}" is not allowed.`
+  }
+
+  if (!allowsPrivateProviderUrls() && isPrivateProviderHostname(hostname)) {
+    return `URL hostname "${hostname}" is private or internal and is not allowed.`
   }
 
   if (parsed.search || parsed.hash) {

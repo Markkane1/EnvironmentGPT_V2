@@ -13,8 +13,19 @@ import {
 const mockLookup = lookup as jest.Mock
 
 describe('ssrf guard', () => {
+  const originalAllowPrivateProviderUrls = process.env.ALLOW_PRIVATE_PROVIDER_URLS
+
   beforeEach(() => {
     jest.clearAllMocks()
+    delete process.env.ALLOW_PRIVATE_PROVIDER_URLS
+  })
+
+  afterAll(() => {
+    if (originalAllowPrivateProviderUrls === undefined) {
+      delete process.env.ALLOW_PRIVATE_PROVIDER_URLS
+    } else {
+      process.env.ALLOW_PRIVATE_PROVIDER_URLS = originalAllowPrivateProviderUrls
+    }
   })
 
   it('rejects non-http schemes', async () => {
@@ -33,7 +44,15 @@ describe('ssrf guard', () => {
     await expect(validateExternalUrl('https://example.com')).resolves.toBeNull()
   })
 
-  it('allows internal provider base URLs for admin-managed LLM endpoints', () => {
+  it('rejects private and internal provider base URLs by default', () => {
+    expect(validateProviderBaseUrl('http://vllm:8000')).toContain('private or internal')
+    expect(validateProviderBaseUrl('http://localhost:11434/v1')).toContain('private or internal')
+    expect(validateProviderBaseUrl('http://192.168.1.25:11434')).toContain('private or internal')
+  })
+
+  it('allows private provider base URLs only when explicitly opted in', () => {
+    process.env.ALLOW_PRIVATE_PROVIDER_URLS = '1'
+
     expect(validateProviderBaseUrl('http://vllm:8000')).toBeNull()
     expect(validateProviderBaseUrl('http://localhost:11434/v1')).toBeNull()
   })

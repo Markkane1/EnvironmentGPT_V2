@@ -11,8 +11,8 @@ const nextCli = path.join(rootDir, 'node_modules', 'next', 'dist', 'bin', 'next'
 
 function getDefaultDatabaseUrl() {
   const user = process.env.POSTGRES_USER || 'postgres'
-  const password = process.env.POSTGRES_PASSWORD || 'postgres'
-  const host = process.env.POSTGRES_HOST || '127.0.0.1'
+  const password = process.env.POSTGRES_PASSWORD || 'root123'
+  const host = process.env.POSTGRES_HOST || 'localhost'
   const port = process.env.POSTGRES_PORT || '5432'
   const database = process.env.POSTGRES_DB || 'environmentgpt'
 
@@ -25,8 +25,11 @@ const env = {
   ...process.env,
   NODE_ENV: process.env.NODE_ENV || 'development',
   NEXT_TELEMETRY_DISABLED: '1',
-  PLAYWRIGHT_TEST: '1',
+  PLAYWRIGHT_TEST: '0',
+  JWT_SECRET: process.env.JWT_SECRET || 'test-jwt-secret',
   DATABASE_URL: databaseUrl,
+  RATE_LIMIT_ADMIN_MAX: process.env.RATE_LIMIT_ADMIN_MAX || '200',
+  RATE_LIMIT_AUTH_MAX: process.env.RATE_LIMIT_AUTH_MAX || '50',
 }
 
 function ensureDatabase() {

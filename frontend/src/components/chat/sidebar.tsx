@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useChatStore } from '@/lib/store'
 import { useAppSettingsStore } from '@/lib/app-settings'
+import { APP_CONFIG, AUDIENCE_TYPES, DOCUMENT_CATEGORIES } from '@/lib/constants'
+import { toast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -16,11 +17,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { 
-  ChevronLeft, 
+import {
+  ChevronLeft,
   ChevronRight,
   MessageSquarePlus,
   Settings,
@@ -32,17 +32,16 @@ import {
   Database,
   History
 } from 'lucide-react'
-import { DOCUMENT_CATEGORIES, REPORT_SERIES, AUDIENCE_TYPES } from '@/lib/constants'
 import { ChatSession } from '@/types'
-import { formatDate, cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { DocumentUploadModal } from '@/components/documents/document-upload-modal'
 import { DocumentList } from '@/components/documents/document-list'
 
-export function Sidebar() {
-  const { 
-    sidebarOpen, 
-    toggleSidebar, 
-    selectedAudience, 
+export function Sidebar({ initialTab = 'filters' }: { initialTab?: 'filters' | 'documents' | 'history' }) {
+  const {
+    sidebarOpen,
+    toggleSidebar,
+    selectedAudience,
     setSelectedAudience,
     selectedCategory,
     setSelectedCategory,
@@ -54,95 +53,159 @@ export function Sidebar() {
     currentSessionId
   } = useChatStore()
   const maxHistoryItems = useAppSettingsStore((state) => state.settings.maxHistoryItems)
-  
-  const [searchQuery, setSearchQuery] = useState('')
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
-  const [selectedReportSeries, setSelectedReportSeries] = useState('all')
-  const [activeTab, setActiveTab] = useState('filters')
-  const [showUploadModal, setShowUploadModal] = useState(false)
 
-  // Load recent sessions
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
+  const [activeTab, setActiveTab] = useState(initialTab)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [kbStats, setKbStats] = useState<{ documents: number; chunks: number } | null>(null)
+  const [sessionsError, setSessionsError] = useState<string | null>(null)
+  const [kbStatsError, setKbStatsError] = useState<string | null>(null)
+
   useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
+
+  useEffect(() => {
+    if (activeTab !== 'history') {
+      return
+    }
+
     const fetchSessions = async () => {
       setIsLoadingSessions(true)
       try {
         const response = await fetch(`/api/sessions?limit=${maxHistoryItems}`)
         const data = await response.json()
-        if (data.success && data.sessions) {
-          setRecentSessions(data.sessions)
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to load sessions')
         }
+
+        setRecentSessions(data.sessions || [])
+        setSessionsError(null)
       } catch (error) {
-        console.error('Failed to load sessions:', error)
+        setRecentSessions([])
+        setSessionsError(error instanceof Error ? error.message : 'Failed to load sessions')
       } finally {
         setIsLoadingSessions(false)
       }
     }
-    
-    fetchSessions()
-  }, [maxHistoryItems, setRecentSessions])
 
-  // Handle session click
+    fetchSessions()
+  }, [activeTab, maxHistoryItems, setRecentSessions])
+
+  useEffect(() => {
+    if (activeTab !== 'documents') {
+      return
+    }
+
+    const fetchKbStats = async () => {
+      try {
+        const [overviewRes, chunksRes] = await Promise.all([
+          fetch('/api/stats?type=overview'),
+          fetch('/api/stats?type=documents'),
+        ])
+
+        if (!overviewRes.ok || !chunksRes.ok) {
+          throw new Error('Failed to load knowledge base statistics')
+        }
+
+        const [overview, docs] = await Promise.all([overviewRes.json(), chunksRes.json()])
+        setKbStats({
+          documents: overview?.statistics?.documents ?? 0,
+          chunks: docs?.statistics?.totalChunks ?? docs?.statistics?.chunks ?? 0,
+        })
+        setKbStatsError(null)
+      } catch (error) {
+        setKbStats(null)
+        setKbStatsError(
+          error instanceof Error ? error.message : 'Failed to load knowledge base statistics'
+        )
+      }
+    }
+
+    fetchKbStats()
+  }, [activeTab])
+
   const handleSessionClick = async (session: ChatSession) => {
     try {
       const response = await fetch(`/api/sessions?id=${session.id}`)
       const data = await response.json()
-      if (data.success && data.session) {
-        loadSession(data.session)
+
+      if (!response.ok || !data.success || !data.session) {
+        throw new Error(data.error || 'Failed to load session')
       }
+
+      loadSession(data.session)
+      setSessionsError(null)
     } catch (error) {
-      console.error('Failed to load session:', error)
+      toast({
+        title: 'Session unavailable',
+        description: error instanceof Error ? error.message : 'Failed to load session',
+        variant: 'destructive'
+      })
     }
   }
 
-  // Handle session delete
-  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
+    event.stopPropagation()
+
     try {
-      await fetch(`/api/sessions?id=${sessionId}`, { method: 'DELETE' })
+      const response = await fetch(`/api/sessions?id=${sessionId}`, { method: 'DELETE' })
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete session')
+      }
+
       removeSession(sessionId)
       if (currentSessionId === sessionId) {
         clearMessages()
       }
+
+      setSessionsError(null)
     } catch (error) {
-      console.error('Failed to delete session:', error)
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Failed to delete session',
+        variant: 'destructive'
+      })
     }
   }
 
-  // Handle document upload complete
   const handleUploadComplete = () => {
     setShowUploadModal(false)
-    // Optionally switch to documents tab
     setActiveTab('documents')
   }
 
-  // Collapsed sidebar
   if (!sidebarOpen) {
     return (
-      <div className="w-12 border-r bg-gray-50 flex flex-col items-center py-4 gap-2">
+      <div className="w-12 border-r bg-white flex flex-col items-center py-3 gap-1">
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleSidebar}
-          className="mb-4"
+          className="h-8 w-8 mb-2"
           title="Expand sidebar"
           aria-label="Expand sidebar"
         >
           <ChevronRight className="w-4 h-4" />
         </Button>
-        
-        <div className="flex flex-col items-center gap-2 mt-4">
-          <Button 
-            variant="ghost" 
-            size="icon" 
+
+        <div className="flex flex-col items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             onClick={clearMessages}
             title="New chat"
             aria-label="Start new chat"
           >
             <MessageSquarePlus className="w-4 h-4" />
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="icon"
+            className="h-8 w-8"
             onClick={() => {
               toggleSidebar()
               setActiveTab('documents')
@@ -152,9 +215,10 @@ export function Sidebar() {
           >
             <Database className="w-4 h-4" />
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="icon"
+            className="h-8 w-8"
             onClick={() => {
               toggleSidebar()
               setShowUploadModal(true)
@@ -164,7 +228,7 @@ export function Sidebar() {
           >
             <Upload className="w-4 h-4" />
           </Button>
-          <Button variant="ghost" size="icon" title="Settings" aria-label="Open settings" asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title="Settings" aria-label="Open settings" asChild>
             <Link href="/settings">
               <Settings className="w-4 h-4" />
             </Link>
@@ -174,25 +238,24 @@ export function Sidebar() {
     )
   }
 
-  // Expanded sidebar
   return (
     <>
       <div className="w-80 border-r bg-gray-50 flex flex-col">
-        {/* Header */}
         <div className="p-4 border-b bg-white">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-600 to-emerald-700 flex items-center justify-center shadow-sm">
                 <Leaf className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h2 className="font-semibold text-sm">EPA Punjab</h2>
+                <h2 className="font-semibold text-sm text-gray-900">EPA Punjab</h2>
                 <span className="text-xs text-gray-500">Environment GPT</span>
               </div>
             </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
               onClick={toggleSidebar}
               title="Collapse sidebar"
               aria-label="Collapse sidebar"
@@ -200,47 +263,42 @@ export function Sidebar() {
               <ChevronLeft className="w-4 h-4" />
             </Button>
           </div>
-          <Badge variant="secondary" className="mt-2 text-xs bg-green-100 text-green-700">
-            Beta v2.0 - Phase 6-7
-          </Badge>
         </div>
 
-        {/* New Chat Button */}
         <div className="p-3">
-          <Button 
-            variant="outline" 
-            className="w-full justify-start gap-2 border-green-200 hover:bg-green-50 hover:border-green-300"
+          <Button
+            variant="outline"
+            className="w-full justify-start gap-2 border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 hover:text-teal-800"
             onClick={clearMessages}
           >
-            <MessageSquarePlus className="w-4 h-4 text-green-600" />
+            <MessageSquarePlus className="w-4 h-4" />
             New Chat
           </Button>
         </div>
 
         <Separator />
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-          <TabsList className="grid w-full grid-cols-3 mx-3 mt-3">
-            <TabsTrigger value="filters" className="text-xs">
-              <Search className="w-3 h-3 mr-1" />
-              Filters
-            </TabsTrigger>
-            <TabsTrigger value="documents" className="text-xs">
-              <Database className="w-3 h-3 mr-1" />
-              Docs
-            </TabsTrigger>
-            <TabsTrigger value="history" className="text-xs">
-              <History className="w-3 h-3 mr-1" />
-              History
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+          <div className="px-3 pt-3">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="filters" className="text-xs">
+                <Search className="w-3 h-3 mr-1" />
+                Filters
+              </TabsTrigger>
+              <TabsTrigger value="documents" className="text-xs">
+                <Database className="w-3 h-3 mr-1" />
+                Docs
+              </TabsTrigger>
+              <TabsTrigger value="history" className="text-xs">
+                <History className="w-3 h-3 mr-1" />
+                History
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-          {/* Filters Tab */}
-          <TabsContent value="filters" className="flex-1 m-0">
-            <ScrollArea className="flex-1">
+          <TabsContent value="filters" className="flex-1 m-0 overflow-hidden">
+            <ScrollArea className="h-full">
               <div className="p-3 space-y-4">
-                {/* Audience Selection */}
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-gray-600">Select Audience</Label>
                   <Select value={selectedAudience} onValueChange={setSelectedAudience}>
@@ -259,7 +317,6 @@ export function Sidebar() {
                   </Select>
                 </div>
 
-                {/* Category Filter */}
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-gray-600">Filter by Category</Label>
                   <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -268,59 +325,35 @@ export function Sidebar() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      {DOCUMENT_CATEGORIES.map((cat) => (
-                        <SelectItem key={cat.value} value={cat.value}>
-                          {cat.label}
+                      {DOCUMENT_CATEGORIES.map((category) => (
+                        <SelectItem key={category.value} value={category.value}>
+                          {category.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                {/* Report Series Filter */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-gray-600">Filter by Report Series</Label>
-                  <Select value={selectedReportSeries} onValueChange={setSelectedReportSeries}>
-                    <SelectTrigger className="bg-white">
-                      <SelectValue placeholder="All reports" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Reports</SelectItem>
-                      {REPORT_SERIES.map((series) => (
-                        <SelectItem key={series.value} value={series.value}>
-                          {series.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Document Search */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-gray-600">Search Documents</Label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input 
-                      placeholder="Search by title..." 
-                      className="bg-white pl-9 text-sm"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                  </div>
                 </div>
 
                 <Separator />
 
-                {/* Quick Stats */}
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-gray-600">Knowledge Base Stats</Label>
+                  {kbStatsError ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {kbStatsError}
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 bg-white rounded border text-center">
-                      <p className="text-lg font-semibold text-green-600">--</p>
+                    <div className="p-2 bg-white rounded-lg border text-center">
+                      <p className="text-lg font-semibold text-teal-700">
+                        {kbStats ? kbStats.documents : '-'}
+                      </p>
                       <p className="text-xs text-gray-500">Documents</p>
                     </div>
-                    <div className="p-2 bg-white rounded border text-center">
-                      <p className="text-lg font-semibold text-blue-600">--</p>
+                    <div className="p-2 bg-white rounded-lg border text-center">
+                      <p className="text-lg font-semibold text-teal-700">
+                        {kbStats ? kbStats.chunks : '-'}
+                      </p>
                       <p className="text-xs text-gray-500">Chunks</p>
                     </div>
                   </div>
@@ -329,18 +362,25 @@ export function Sidebar() {
             </ScrollArea>
           </TabsContent>
 
-          {/* Documents Tab */}
           <TabsContent value="documents" className="flex-1 m-0">
-            <DocumentList 
-              onUploadClick={() => setShowUploadModal(true)}
-              onSelectDocument={() => {}}
-            />
+            {kbStatsError ? (
+              <div className="px-3 pt-3">
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {kbStatsError}
+                </p>
+              </div>
+            ) : null}
+            <DocumentList onUploadClick={() => setShowUploadModal(true)} />
           </TabsContent>
 
-          {/* History Tab */}
-          <TabsContent value="history" className="flex-1 m-0">
+          <TabsContent value="history" className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="p-3 space-y-2">
+                {sessionsError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    {sessionsError}
+                  </div>
+                ) : null}
                 {isLoadingSessions ? (
                   <>
                     <Skeleton className="h-12 w-full" />
@@ -349,13 +389,13 @@ export function Sidebar() {
                   </>
                 ) : recentSessions.length > 0 ? (
                   recentSessions.slice(0, maxHistoryItems).map((session) => (
-                    <div 
+                    <div
                       key={session.id}
                       onClick={() => handleSessionClick(session)}
                       className={cn(
                         'p-2 rounded-md bg-white border text-xs cursor-pointer transition-colors group',
-                        currentSessionId === session.id 
-                          ? 'border-green-300 bg-green-50' 
+                        currentSessionId === session.id
+                          ? 'border-green-300 bg-green-50'
                           : 'hover:bg-gray-50'
                       )}
                     >
@@ -373,7 +413,7 @@ export function Sidebar() {
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                          onClick={(e) => handleDeleteSession(session.id, e)}
+                          onClick={(event) => handleDeleteSession(session.id, event)}
                           aria-label={`Delete session ${session.title || 'Untitled Chat'}`}
                         >
                           <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-500" />
@@ -391,19 +431,19 @@ export function Sidebar() {
           </TabsContent>
         </Tabs>
 
-        {/* Footer */}
         <div className="p-3 border-t bg-white">
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-              <HelpCircle className="w-3 h-3 mr-1" />
-              Help
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-gray-500 hover:text-gray-700" asChild>
+              <a href={APP_CONFIG.organizationUrl} target="_blank" rel="noopener noreferrer">
+                <HelpCircle className="w-3 h-3 mr-1" />
+                EPA Punjab
+              </a>
             </Button>
-            <span>v2.0.0-beta</span>
+            <span className="text-xs text-gray-400">v2.0.0-beta</span>
           </div>
         </div>
       </div>
 
-      {/* Upload Modal */}
       <DocumentUploadModal
         open={showUploadModal}
         onOpenChange={setShowUploadModal}
@@ -413,14 +453,13 @@ export function Sidebar() {
   )
 }
 
-// Leaf icon component
 function Leaf({ className }: { className?: string }) {
   return (
-    <svg 
-      className={className} 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
       strokeWidth="2"
     >
       <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
