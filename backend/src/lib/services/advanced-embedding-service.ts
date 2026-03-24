@@ -3,8 +3,8 @@
 // Phase 4: Production-Ready Vector Embedding System
 // =====================================================
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { llmProviderRegistry } from './llm-provider-registry'
 import type { ChunkMetadata, RetrievalResult } from '@/types'
 import { RAG_CONFIG } from '@/lib/constants'
 
@@ -46,7 +46,6 @@ export interface HybridSearchResult {
 // ==================== Advanced Embedding Service ====================
 
 export class AdvancedEmbeddingService {
-  private zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
   private embeddingCache: Map<string, { embedding: number[]; timestamp: number }> = new Map()
   private readonly CACHE_TTL = 1000 * 60 * 60 * 24 // 24 hours
   private readonly MAX_CACHE_SIZE = 10000
@@ -54,13 +53,6 @@ export class AdvancedEmbeddingService {
 
   constructor(dimension: number = RAG_CONFIG.embeddingDimension) {
     this.dimension = dimension
-  }
-
-  async initialize() {
-    if (!this.zai) {
-      this.zai = await ZAI.create()
-    }
-    return this.zai
   }
 
   // ==================== Core Embedding Methods ====================
@@ -138,20 +130,42 @@ export class AdvancedEmbeddingService {
   }
 
   /**
-   * Generate embedding using ZAI or fallback to semantic hashing
+   * Generate embedding via the provider's /v1/embeddings endpoint,
+   * falling back to deterministic semantic hashing if unavailable.
    */
   private async generateEmbedding(text: string): Promise<number[]> {
     try {
-      await this.initialize()
-      
-      // Use semantic embedding generation
-      // This creates a more sophisticated embedding than simple hashing
-      const embedding = this.generateSemanticEmbedding(text)
-      return embedding
-    } catch (error) {
-      console.error('Embedding generation failed:', error)
-      return new Array(this.dimension).fill(0)
+      const providers = await llmProviderRegistry.getProviderChain()
+      const provider = providers[0]
+      if (!provider) throw new Error('No provider available')
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (provider.apiKeyEnvVar) {
+        const apiKey = process.env[provider.apiKeyEnvVar]
+        if (apiKey) {
+          if (provider.providerType === 'azure') {
+            headers['api-key'] = apiKey
+          } else {
+            headers.Authorization = `Bearer ${apiKey}`
+          }
+        }
+      }
+
+      const response = await fetch(`${provider.baseUrl}/v1/embeddings`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: provider.modelId, input: text })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        return data.data[0].embedding as number[]
+      }
+    } catch {
+      console.warn('[AdvancedEmbeddingService] Provider embedding failed, using semantic hash fallback')
     }
+
+    return this.generateSemanticEmbedding(text)
   }
 
   /**

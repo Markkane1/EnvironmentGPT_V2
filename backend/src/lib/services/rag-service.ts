@@ -1,11 +1,12 @@
 // =====================================================
-// EPA Punjab EnvironmentGPT - Enhanced RAG Service
+// EPA Punjab EnvironmentGPT - RAG Service
 // Phase 2: Retrieval-Augmented Generation Pipeline
+// Internal compatibility layer retained outside the public services barrel
 // =====================================================
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { embeddingService } from './embedding-service'
+import { llmProviderRegistry } from './llm-provider-registry'
 import { 
   ChatRequest, 
   ChatResponse, 
@@ -17,18 +18,10 @@ import { RAG_CONFIG } from '@/lib/constants'
 // ==================== RAG Service Class ====================
 
 export class RAGService {
-  private zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
   private config: RAGConfig
 
   constructor(config?: Partial<RAGConfig>) {
     this.config = { ...RAG_CONFIG, ...config }
-  }
-
-  async initialize() {
-    if (!this.zai) {
-      this.zai = await ZAI.create()
-    }
-    return this.zai
   }
 
   /**
@@ -36,8 +29,6 @@ export class RAGService {
    */
   async processQuery(request: ChatRequest): Promise<ChatResponse> {
     try {
-      await this.initialize()
-
       // Step 1: Retrieve relevant documents
       const retrievalResult = await embeddingService.retrieveRelevantChunks(
         request.message,
@@ -55,17 +46,17 @@ export class RAGService {
       )
 
       // Step 4: Generate response using LLM
-      const completion = await this.zai!.chat.completions.create({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: request.message }
-        ],
-        temperature: 0.7,
-        max_tokens: this.config.maxContextTokens
-      })
-
-      const assistantResponse = completion.choices[0]?.message?.content || 
-        'I apologize, but I was unable to generate a response. Please try again.'
+      let assistantResponse: string
+      try {
+        const { content } = await llmProviderRegistry.chat(
+          systemPrompt,
+          request.message,
+          { temperature: 0.7, maxTokens: this.config.maxContextTokens }
+        )
+        assistantResponse = content || 'I apologize, but I was unable to generate a response. Please try again.'
+      } catch {
+        assistantResponse = 'I apologize, but I was unable to generate a response. Please try again.'
+      }
 
       // Step 5: Format sources
       const sources = await this.formatSources(retrievalResult.chunks, retrievalResult.scores)

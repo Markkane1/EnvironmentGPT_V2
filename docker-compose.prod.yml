@@ -58,6 +58,22 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ==================== vLLM Resource Limits ====================
+  vllm:
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 32G
+        reservations:
+          cpus: '2'
+          memory: 16G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nginx:
     logging:
       driver: "json-file"

@@ -8,7 +8,18 @@ const frontendDir = path.join(rootDir, 'frontend')
 const nodeCommand = process.execPath
 const prismaCli = path.join(rootDir, 'node_modules', 'prisma', 'build', 'index.js')
 const nextCli = path.join(rootDir, 'node_modules', 'next', 'dist', 'bin', 'next')
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5432/environmentgpt?schema=public'
+
+function getDefaultDatabaseUrl() {
+  const user = process.env.POSTGRES_USER || 'postgres'
+  const password = process.env.POSTGRES_PASSWORD || 'postgres'
+  const host = process.env.POSTGRES_HOST || '127.0.0.1'
+  const port = process.env.POSTGRES_PORT || '5432'
+  const database = process.env.POSTGRES_DB || 'environmentgpt'
+
+  return `postgresql://${user}:${password}@${host}:${port}/${database}?schema=public`
+}
+
+const databaseUrl = process.env.DATABASE_URL || getDefaultDatabaseUrl()
 
 const env = {
   ...process.env,

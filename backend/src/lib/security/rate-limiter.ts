@@ -15,6 +15,10 @@ interface RateLimitConfig {
   blockDuration: number // Block duration in ms after limit exceeded
 }
 
+type RateLimitEnv = {
+  TRUST_PROXY_HEADERS?: string
+}
+
 function readPositiveIntegerEnv(
   name: string,
   fallback: number
@@ -148,7 +152,15 @@ export function checkRateLimit(
 /**
  * Get client identifier from request
  */
-export function getClientIdentifier(request: Request): string {
+function trustProxyHeaders(env: RateLimitEnv = process.env as RateLimitEnv): boolean {
+  return env.TRUST_PROXY_HEADERS === '1'
+}
+
+export function getClientIdentifier(request: Request, env: RateLimitEnv = process.env as RateLimitEnv): string {
+  if (!trustProxyHeaders(env)) {
+    return 'unknown'
+  }
+
   const forwarded = request.headers.get('x-forwarded-for')
   const realIp = request.headers.get('x-real-ip')
   
@@ -234,3 +246,4 @@ export function withRateLimit(
     return response
   }
 }
+

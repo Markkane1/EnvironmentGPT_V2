@@ -7,10 +7,11 @@
 export { chatService } from './chat-service'
 export { documentService } from './document-service'
 export { documentIngestionService } from './document-ingestion-service'
-export { embeddingService } from './embedding-service'
 export { vectorStoreService } from './vector-store-service'
 
 // Phase 4 Services
+// Public service exports prefer the advanced implementations. The legacy
+// embedding/rag services remain available only via direct internal imports.
 export { advancedEmbeddingService, AdvancedEmbeddingService } from './advanced-embedding-service'
 export { queryProcessorService, QueryProcessorService } from './query-processor'
 export { responseCacheService, ResponseCacheService } from './response-cache'

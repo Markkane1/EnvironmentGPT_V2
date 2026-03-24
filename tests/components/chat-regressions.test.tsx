@@ -1,6 +1,5 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { ChatInterface } from '@/components/chat/chat-interface'
 import { EnhancedChatInterface } from '@/components/chat/enhanced-chat-interface'
 import { useChatStore, useUIStore } from '@/lib/store'
 
@@ -42,7 +41,7 @@ beforeEach(() => {
   resetStores()
 })
 
-describe('ChatInterface regressions', () => {
+describe('EnhancedChatInterface regressions', () => {
   it('sends the current session and omits the all-category filter', async () => {
     fetchMock.mockResolvedValueOnce({
       json: async () => ({
@@ -54,7 +53,7 @@ describe('ChatInterface regressions', () => {
       }),
     })
 
-    render(<ChatInterface />)
+    render(<EnhancedChatInterface />)
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'What is the AQI?' } })
     fireEvent.click(screen.getByRole('button', { name: /send/i }))
@@ -99,7 +98,7 @@ describe('ChatInterface regressions', () => {
       }),
     })
 
-    render(<ChatInterface />)
+    render(<EnhancedChatInterface />)
 
     fireEvent.click(screen.getByRole('button', { name: /regenerate/i }))
 
@@ -141,7 +140,7 @@ describe('ChatInterface regressions', () => {
       }),
     })
 
-    render(<ChatInterface />)
+    render(<EnhancedChatInterface />)
 
     fireEvent.click(screen.getByRole('button', { name: /mark response as helpful/i }))
 
@@ -157,9 +156,6 @@ describe('ChatInterface regressions', () => {
       rating: 5,
     })
   })
-})
-
-describe('EnhancedChatInterface regressions', () => {
   it('clears stale sources when starting a new chat', async () => {
     fetchMock.mockResolvedValueOnce({
       json: async () => ({

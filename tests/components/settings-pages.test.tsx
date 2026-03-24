@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Sidebar } from '@/components/chat/sidebar'
-import { ChatInterface } from '@/components/chat/chat-interface'
+import { EnhancedChatInterface } from '@/components/chat/enhanced-chat-interface'
 import { SettingsPanel } from '@/components/settings/settings-panel'
 import { AppSettingsProvider } from '@/components/settings/app-settings-provider'
 import { defaultAppSettings, useAppSettingsStore } from '@/lib/app-settings'
@@ -99,9 +99,9 @@ describe('SettingsPanel', () => {
       ],
     })
 
-    render(<ChatInterface />)
+    render(<EnhancedChatInterface />)
 
-    expect(screen.queryByText('Sources:')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /source/i })).not.toBeInTheDocument()
   })
 
   it('applies the saved theme to the document root', async () => {

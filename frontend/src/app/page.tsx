@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { Sidebar } from '@/components/chat/sidebar'
 import { EnhancedChatInterface } from '@/components/chat/enhanced-chat-interface'
 import { useChatStore } from '@/lib/store'
@@ -10,52 +9,12 @@ import { Menu, ExternalLink } from 'lucide-react'
 
 export default function Home() {
   const { toggleSidebar, sidebarOpen } = useChatStore()
-  const [showAdminLink, setShowAdminLink] = useState(false)
-
-  useEffect(() => {
-    let active = true
-
-    async function loadSession() {
-      try {
-        const response = await fetch('/api/auth/session', {
-          method: 'GET',
-          cache: 'no-store',
-        })
-
-        if (!response.ok) {
-          if (active) {
-            setShowAdminLink(false)
-          }
-          return
-        }
-
-        const payload = await response.json()
-
-        if (active) {
-          setShowAdminLink(payload.authenticated === true && payload.role === 'admin')
-        }
-      } catch {
-        if (active) {
-          setShowAdminLink(false)
-        }
-      }
-    }
-
-    void loadSession()
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   return (
     <div className="flex h-screen bg-white">
-      {/* Sidebar */}
       <Sidebar />
-      
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Header */}
+
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="border-b bg-white px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -79,12 +38,12 @@ export default function Home() {
                 Phase 6 Complete
               </Badge>
             </div>
-            
+
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" asChild>
-                <a 
-                  href="https://epunjab.gov.pk/epa" 
-                  target="_blank" 
+                <a
+                  href="https://epunjab.gov.pk/epa"
+                  target="_blank"
                   rel="noopener noreferrer"
                   className="gap-1"
                 >
@@ -92,18 +51,15 @@ export default function Home() {
                   EPA Punjab
                 </a>
               </Button>
-              {showAdminLink ? (
-                <Button variant="outline" size="sm" asChild>
-                  <a href="/admin" className="gap-1">
-                    Admin
-                  </a>
-                </Button>
-              ) : null}
+              <Button variant="outline" size="sm" asChild>
+                <a href="/admin" className="gap-1">
+                  Admin
+                </a>
+              </Button>
             </div>
           </div>
         </header>
 
-        {/* Chat Interface */}
         <main className="flex-1 overflow-hidden">
           <EnhancedChatInterface />
         </main>

@@ -494,7 +494,7 @@ This is real-time air quality data. Use this information to provide current cont
 
     return `
 ## Current Weather Data (${location})
-- **Temperature**: ${temp}°C
+- **Temperature**: ${temp}Â°C
 - **Humidity**: ${humidity}%
 - **Conditions**: ${conditions}
 - **Timestamp**: ${new Date().toISOString()}
@@ -553,40 +553,47 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
     }
 
     const connectors = await this.getConnectorsForTopic(topic)
+    const params: Record<string, unknown> = {}
 
-    for (const connector of connectors) {
+    if (queryContext?.location) params.location = queryContext.location
+    if (queryContext?.date) params.date = queryContext.date
+
+    const enrichments = await Promise.all(connectors.map(async (connector, index) => {
       try {
-        // Build params from context
-        const params: Record<string, unknown> = {}
-        if (queryContext?.location) params.location = queryContext.location
-        if (queryContext?.date) params.date = queryContext.date
-
         const { data } = await this.fetchData(connector, params)
-        const contextTemplate = this.buildInjectionTemplate(connector, data)
 
-        // Inject based on method
-        switch (connector.injectAs) {
-          case 'system_context':
-            result.systemContext += `\n\n${contextTemplate}`
-            break
-          case 'user_context':
-            result.userContext += `\n\n${contextTemplate}`
-            break
-          case 'post_retrieval':
-            result.postRetrievalContext += `\n\n${contextTemplate}`
-            break
+        return {
+          index,
+          connector,
+          contextTemplate: this.buildInjectionTemplate(connector, data)
         }
-
-        result.connectorsUsed.push(connector.name)
-        result.liveDataCitations.push({
-          source: connector.displayName,
-          type: connector.connectorType,
-          timestamp: new Date()
-        })
       } catch (error) {
         console.warn(`[DataConnector] Failed to fetch from ${connector.name}:`, error)
-        // Continue with other connectors
+        return null
       }
+    }))
+
+    for (const enrichment of enrichments
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((left, right) => left.index - right.index)) {
+      switch (enrichment.connector.injectAs) {
+        case 'system_context':
+          result.systemContext += `\n\n${enrichment.contextTemplate}`
+          break
+        case 'user_context':
+          result.userContext += `\n\n${enrichment.contextTemplate}`
+          break
+        case 'post_retrieval':
+          result.postRetrievalContext += `\n\n${enrichment.contextTemplate}`
+          break
+      }
+
+      result.connectorsUsed.push(enrichment.connector.name)
+      result.liveDataCitations.push({
+        source: enrichment.connector.displayName,
+        type: enrichment.connector.connectorType,
+        timestamp: new Date()
+      })
     }
 
     return result
@@ -890,3 +897,4 @@ Compare with NEQS standards: pH 6.5-8.5, TDS <1000 mg/L, Turbidity <5 NTU
 
 // Export singleton instance
 export const dataConnectorService = new DataConnectorService()
+

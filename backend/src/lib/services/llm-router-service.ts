@@ -20,6 +20,13 @@ export interface RouterRequest {
     role: 'user' | 'assistant'
     content: string
   }>
+  retrievedDocuments?: Array<{
+    id: string
+    title: string
+    category: string
+    content: string
+    relevanceScore?: number
+  }>
 }
 
 export interface RouterResponse {
@@ -36,6 +43,7 @@ export interface RouterResponse {
       type: ConnectorType
       timestamp: Date
     }>
+    retrievedDocCount: number
   }
   tokens?: {
     prompt: number
@@ -95,9 +103,6 @@ const TOPIC_KEYWORDS: Record<string, string[]> = {
   ]
 }
 
-/**
- * Detect topic from query
- */
 function detectTopic(query: string): string {
   const lowerQuery = query.toLowerCase()
 
@@ -115,61 +120,18 @@ function detectTopic(query: string): string {
 // ==================== LLM Router Service ====================
 
 class LLMRouterService {
-  /**
-   * Process a query through the complete pipeline
-   * 1. Detect topic
-   * 2. Enrich context with live data
-   * 3. Build prompt with context
-   * 4. Call LLM with fallback
-   * 5. Return enriched response
-   */
   async processQuery(request: RouterRequest): Promise<RouterResponse> {
     const startTime = Date.now()
 
     try {
-      // Step 1: Detect topic
-      const topic = request.category ? request.category.toLowerCase().replace(' ', '_') : detectTopic(request.query)
+      const { messages, enrichedContext, topic } = await this.buildMessages(request)
 
-      // Step 2: Enrich context with live data
-      const enrichedContext = await dataConnectorService.enrichContext(topic, {
-        location: request.location,
-        query: request.query
-      })
-
-      // Step 3: Build system prompt
-      const systemPrompt = this.buildSystemPrompt(
-        topic,
-        request.audienceType || 'General Public',
-        enrichedContext
-      )
-
-      // Step 4: Build messages array
-      const messages: ChatCompletionRequest['messages'] = [
-        { role: 'system', content: systemPrompt }
-      ]
-
-      // Add conversation history if provided
-      if (request.conversationHistory && request.conversationHistory.length > 0) {
-        for (const msg of request.conversationHistory) {
-          messages.push(msg)
-        }
-      }
-
-      // Add current query (potentially enriched)
-      const userContent = enrichedContext.userContext
-        ? `${request.query}\n\nContext:\n${enrichedContext.userContext}`
-        : request.query
-
-      messages.push({ role: 'user', content: userContent })
-
-      // Step 5: Call LLM with automatic fallback
       const llmResult = await llmProviderRegistry.chatCompletion({
         messages,
         temperature: 0.7,
         max_tokens: 2000
       })
 
-      // Step 6: Log the request
       await this.logRequest({
         sessionId: request.sessionId,
         query: request.query,
@@ -183,18 +145,17 @@ class LLMRouterService {
         fallbackTo: llmResult.fallbackChain?.[llmResult.fallbackChain.length - 1]
       })
 
-      const totalLatencyMs = Date.now() - startTime
-
       return {
         success: llmResult.success,
         content: llmResult.response?.choices[0]?.message?.content || '',
         providerUsed: llmResult.providerUsed || 'unknown',
         modelUsed: llmResult.modelUsed || 'unknown',
-        latencyMs: totalLatencyMs,
+        latencyMs: Date.now() - startTime,
         fallbackChain: llmResult.fallbackChain,
         enrichedContext: {
           connectorsUsed: enrichedContext.connectorsUsed,
-          liveDataCitations: enrichedContext.liveDataCitations
+          liveDataCitations: enrichedContext.liveDataCitations,
+          retrievedDocCount: request.retrievedDocuments?.length || 0
         },
         tokens: llmResult.tokens,
         error: llmResult.error
@@ -210,20 +171,93 @@ class LLMRouterService {
         latencyMs: Date.now() - startTime,
         enrichedContext: {
           connectorsUsed: [],
-          liveDataCitations: []
+          liveDataCitations: [],
+          retrievedDocCount: 0
         },
         error: errorMessage
       }
     }
   }
 
-  /**
-   * Build system prompt with audience type and context
-   */
+  async streamQuery(request: RouterRequest): Promise<{
+    stream: ReadableStream<Uint8Array>
+    providerUsed: string
+    modelUsed: string
+    connectorsUsed: string[]
+  }> {
+    const { messages, enrichedContext } = await this.buildMessages(request)
+
+    const result = await llmProviderRegistry.streamChatCompletion({
+      messages,
+      temperature: 0.7,
+      max_tokens: 2000
+    })
+
+    void this.logRequest({
+      sessionId: request.sessionId,
+      query: request.query,
+      topic: 'stream',
+      providerUsed: result.providerUsed,
+      modelUsed: result.modelUsed,
+      latencyMs: 0,
+      status: 'success'
+    })
+
+    return {
+      ...result,
+      connectorsUsed: enrichedContext.connectorsUsed
+    }
+  }
+
+  private async buildMessages(request: RouterRequest): Promise<{
+    messages: ChatCompletionRequest['messages']
+    enrichedContext: EnrichedContext
+    topic: string
+  }> {
+    const topic = request.category
+      ? request.category.toLowerCase().replace(' ', '_')
+      : detectTopic(request.query)
+
+    const enrichedContext = await dataConnectorService.enrichContext(topic, {
+      location: request.location,
+      query: request.query
+    })
+
+    const systemPrompt = this.buildSystemPrompt(
+      topic,
+      request.audienceType || 'General Public',
+      enrichedContext,
+      request.retrievedDocuments
+    )
+
+    const messages: ChatCompletionRequest['messages'] = [
+      { role: 'system', content: systemPrompt }
+    ]
+
+    if (request.conversationHistory && request.conversationHistory.length > 0) {
+      for (const message of request.conversationHistory) {
+        messages.push(message)
+      }
+    }
+
+    const userContent = enrichedContext.userContext
+      ? `${request.query}\n\nContext:\n${enrichedContext.userContext}`
+      : request.query
+
+    messages.push({ role: 'user', content: userContent })
+
+    return {
+      messages,
+      enrichedContext,
+      topic
+    }
+  }
+
   private buildSystemPrompt(
     topic: string,
     audienceType: 'General Public' | 'Technical' | 'Policy Maker',
-    enrichedContext: EnrichedContext
+    enrichedContext: EnrichedContext,
+    retrievedDocuments?: RouterRequest['retrievedDocuments']
   ): string {
     const audienceInstructions = this.getAudienceInstructions(audienceType)
     const topicContext = this.getTopicContext(topic)
@@ -237,7 +271,6 @@ ${audienceInstructions}
 ${topicContext}
 `
 
-    // Add live data context if available
     if (enrichedContext.systemContext) {
       systemPrompt += `
 
@@ -249,7 +282,18 @@ When referencing this live data, cite the source appropriately.
 `
     }
 
-    // Add post-retrieval context if available
+    if (retrievedDocuments && retrievedDocuments.length > 0) {
+      const docsToInject = retrievedDocuments.slice(0, 5)
+      systemPrompt += `
+
+## Retrieved Knowledge Base Documents
+The following documents from the EPA Punjab knowledge base are relevant to this query. Use them as your primary source of truth:
+
+${docsToInject.map((doc) => `### ${doc.title} (${doc.category})
+${doc.content.slice(0, 2000)}`).join('\n\n')}
+`
+    }
+
     if (enrichedContext.postRetrievalContext) {
       systemPrompt += `
 
@@ -258,7 +302,6 @@ ${enrichedContext.postRetrievalContext}
 `
     }
 
-    // Add general instructions
     systemPrompt += `
 
 ## Response Guidelines
@@ -268,15 +311,13 @@ ${enrichedContext.postRetrievalContext}
 4. Keep responses focused and relevant to Punjab's environmental context
 5. Use appropriate technical depth for the audience type
 6. If the question is outside environmental scope, politely redirect
+7. Prioritize information from the Retrieved Knowledge Base Documents over your general knowledge. Cite document titles.
 
 Stay within the environmental domain. Do not provide advice on medical, legal, or other non-environmental topics unless they directly relate to environmental health or regulations.`
 
     return systemPrompt
   }
 
-  /**
-   * Get audience-specific instructions
-   */
   private getAudienceInstructions(audienceType: string): string {
     switch (audienceType) {
       case 'Technical':
@@ -295,7 +336,7 @@ Stay within the environmental domain. Do not provide advice on medical, legal, o
 - Consider implementation challenges
 - Provide comparative analysis when helpful`
 
-      default: // General Public
+      default:
         return `
 - Use plain, accessible language
 - Avoid technical jargon or explain it when necessary
@@ -305,9 +346,6 @@ Stay within the environmental domain. Do not provide advice on medical, legal, o
     }
   }
 
-  /**
-   * Get topic-specific context
-   */
   private getTopicContext(topic: string): string {
     const contexts: Record<string, string> = {
       air_quality: `
@@ -362,9 +400,6 @@ Focus on environmental policy in Punjab, including:
     return contexts[topic] || 'Provide relevant environmental information for Punjab, Pakistan.'
   }
 
-  /**
-   * Log LLM request to database
-   */
   private async logRequest(params: {
     sessionId?: string
     query: string
@@ -378,7 +413,6 @@ Focus on environmental policy in Punjab, including:
     fallbackTo?: string
   }): Promise<void> {
     try {
-      // Find provider ID by name
       let providerId: string | null = null
       if (params.providerUsed) {
         const provider = await db.lLMProvider.findFirst({
@@ -391,7 +425,7 @@ Focus on environmental policy in Punjab, including:
         data: {
           providerId,
           sessionId: params.sessionId,
-          query: params.query.substring(0, 500), // Truncate long queries
+          query: params.query.substring(0, 500),
           modelUsed: params.modelUsed,
           latencyMs: params.latencyMs,
           status: params.status,
@@ -405,9 +439,6 @@ Focus on environmental policy in Punjab, including:
     }
   }
 
-  /**
-   * Get pipeline statistics
-   */
   async getStats(): Promise<PipelineStats> {
     const [providerStats, connectorStats, recentLogs] = await Promise.all([
       llmProviderRegistry.getStats(),
@@ -415,7 +446,7 @@ Focus on environmental policy in Punjab, including:
       db.lLMRequestLog.findMany({
         where: {
           createdAt: {
-            gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
+            gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
           }
         },
         select: {
@@ -426,9 +457,9 @@ Focus on environmental policy in Punjab, including:
     ])
 
     const totalRequests = recentLogs.length
-    const successfulRequests = recentLogs.filter(l => l.status === 'success').length
+    const successfulRequests = recentLogs.filter((log) => log.status === 'success').length
     const avgLatencyMs = totalRequests > 0
-      ? recentLogs.reduce((sum, l) => sum + (l.latencyMs || 0), 0) / totalRequests
+      ? recentLogs.reduce((sum, log) => sum + (log.latencyMs || 0), 0) / totalRequests
       : 0
 
     return {
@@ -450,9 +481,6 @@ Focus on environmental policy in Punjab, including:
     }
   }
 
-  /**
-   * Health check for entire pipeline
-   */
   async healthCheck(): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy'
     providers: Record<string, { healthy: boolean; latencyMs: number | null; error?: string }>
@@ -467,8 +495,7 @@ Focus on environmental policy in Punjab, including:
       connectorHealth[connector.name] = testResult.success ? 'healthy' : 'unhealthy'
     }
 
-    // Determine overall status
-    const healthyProviders = Object.values(providerHealth).filter(status => status.healthy).length
+    const healthyProviders = Object.values(providerHealth).filter((status) => status.healthy).length
     const totalProviders = Object.keys(providerHealth).length
 
     let status: 'healthy' | 'degraded' | 'unhealthy'
@@ -483,9 +510,6 @@ Focus on environmental policy in Punjab, including:
     return { status, providers: providerHealth, connectors: connectorHealth }
   }
 
-  /**
-   * Simple chat method for quick queries
-   */
   async chat(
     message: string,
     options?: {
@@ -506,9 +530,7 @@ Focus on environmental policy in Punjab, including:
   }
 }
 
-// Export singleton instance
 export const llmRouter = new LLMRouterService()
 
-// Re-export types for convenience
 export type { LLMProviderConfig, ChatCompletionRequest, ChatCompletionResponse } from './llm-provider-registry'
 export type { DataConnectorConfig, ConnectorType as ConnectorTypeEnum } from './data-connector-service'

@@ -3,8 +3,8 @@
 // Phase 5: Production-Ready Retrieval-Augmented Generation
 // =====================================================
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { llmProviderRegistry } from './llm-provider-registry'
 import { advancedEmbeddingService } from './advanced-embedding-service'
 import { queryProcessorService, ProcessedQuery } from './query-processor'
 import { responseCacheService } from './response-cache'
@@ -73,18 +73,10 @@ const DEFAULT_ENHANCED_CONFIG: EnhancedRAGConfig = {
 // ==================== Enhanced RAG Service ====================
 
 export class EnhancedRAGService {
-  private zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
   private config: EnhancedRAGConfig
 
   constructor(config?: Partial<EnhancedRAGConfig>) {
     this.config = { ...DEFAULT_ENHANCED_CONFIG, ...config }
-  }
-
-  async initialize() {
-    if (!this.zai) {
-      this.zai = await ZAI.create()
-    }
-    return this.zai
   }
 
   // ==================== Main Query Processing ====================
@@ -99,7 +91,6 @@ export class EnhancedRAGService {
     const cachedResponse = false
 
     try {
-      await this.initialize()
 
       // Step 1: Preprocess query
       const processedQuery = queryProcessorService.processQuery(request.message)
@@ -160,14 +151,14 @@ export class EnhancedRAGService {
 
       // Step 5: Generate response
       const generationStart = Date.now()
-      const completion = await this.zai!.chat.completions.create({
+      const llmResult = await llmProviderRegistry.chatCompletion({
         messages: this.buildMessages(systemPrompt, conversationHistory, request.message),
         temperature: 0.7,
         max_tokens: this.config.maxContextTokens
       })
       generationTime = Date.now() - generationStart
 
-      const assistantResponse = completion.choices[0]?.message?.content || 
+      const assistantResponse = llmResult.response?.choices[0]?.message?.content ||
         'I apologize, but I was unable to generate a response. Please try again.'
 
       // Step 6: Calculate confidence and format sources
@@ -233,8 +224,6 @@ export class EnhancedRAGService {
    */
   async *processQueryStream(request: ChatRequest): AsyncGenerator<StreamChunk> {
     try {
-      await this.initialize()
-
       // Preprocess query
       const processedQuery = queryProcessorService.processQuery(request.message)
       
@@ -264,17 +253,16 @@ export class EnhancedRAGService {
         processedQuery
       )
 
-      // Stream response from LLM
-      // Note: The actual streaming implementation depends on ZAI SDK support
-      // For now, we'll simulate streaming by yielding the full response
-      
-      const completion = await this.zai!.chat.completions.create({
+      // TODO: Add native streaming support to llmProviderRegistry when the
+      // provider chain supports SSE/stream:true. For now we fetch the full
+      // response and simulate streaming by yielding word chunks.
+      const llmResult = await llmProviderRegistry.chatCompletion({
         messages: this.buildMessages(systemPrompt, conversationHistory, request.message),
         temperature: 0.7,
         max_tokens: this.config.maxContextTokens
       })
 
-      const fullResponse = completion.choices[0]?.message?.content || ''
+      const fullResponse = llmResult.response?.choices[0]?.message?.content || ''
       
       // Yield response in chunks (simulated streaming)
       const words = fullResponse.split(' ')
@@ -501,46 +489,59 @@ Politely decline questions about politics, religion, sports, entertainment, or o
     chunks: Array<{ id: string; documentId?: string; content: string }>,
     scores: number[]
   ): Promise<SourceReference[]> {
-    const sources: SourceReference[] = []
+    const orderedDocuments: Array<{ documentId: string; score: number; content: string }> = []
     const seenDocuments = new Set<string>()
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       if (!chunk.documentId || seenDocuments.has(chunk.documentId)) continue
 
-      try {
-        const document = await db.document.findUnique({
-          where: { id: chunk.documentId },
-          select: { 
-            id: true, 
-            title: true, 
-            category: true, 
-            year: true,
-            source: true 
-          }
-        })
+      seenDocuments.add(chunk.documentId)
+      orderedDocuments.push({
+        documentId: chunk.documentId,
+        score: scores[i] || 0,
+        content: chunk.content,
+      })
 
-        if (document) {
-          seenDocuments.add(chunk.documentId)
-          sources.push({
-            id: document.id,
-            documentId: document.id,
-            title: document.title,
-            category: document.category || undefined,
-            relevanceScore: scores[i] || 0,
-            excerpt: chunk.content.slice(0, 200) + (chunk.content.length > 200 ? '...' : ''),
-            year: document.year || undefined,
-            source: document.source || undefined
-          })
-        }
-      } catch (error) {
-        console.error('Failed to fetch document:', error)
-      }
-
-      if (sources.length >= 5) break
+      if (orderedDocuments.length >= 5) break
     }
 
-    return sources
+    if (orderedDocuments.length === 0) {
+      return []
+    }
+
+    const documents = await db.document.findMany({
+      where: {
+        id: {
+          in: orderedDocuments.map((item) => item.documentId),
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        year: true,
+        source: true,
+      },
+    })
+
+    const documentsById = new Map(documents.map((document) => [document.id, document]))
+
+    return orderedDocuments.flatMap((item) => {
+      const document = documentsById.get(item.documentId)
+      if (!document) return []
+
+      return [{
+        id: document.id,
+        documentId: document.id,
+        title: document.title,
+        category: document.category || undefined,
+        relevanceScore: item.score,
+        excerpt: item.content.slice(0, 200) + (item.content.length > 200 ? '...' : ''),
+        year: document.year || undefined,
+        source: document.source || undefined,
+      }]
+    })
   }
 
   private async saveMessages(
@@ -661,3 +662,4 @@ Politely decline questions about politics, religion, sports, entertainment, or o
 
 // Export singleton instance
 export const enhancedRAGService = new EnhancedRAGService()
+

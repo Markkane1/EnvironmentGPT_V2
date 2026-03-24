@@ -12,6 +12,7 @@ jest.mock('@/lib/db', () => ({
   db: {
     refreshToken: {
       findUnique: jest.fn(),
+      update: jest.fn(),
       updateMany: jest.fn(),
     },
   },
@@ -20,6 +21,7 @@ jest.mock('@/lib/db', () => ({
 const mockDb = db as {
   refreshToken: {
     findUnique: jest.Mock
+    update: jest.Mock
     updateMany: jest.Mock
   }
 }
@@ -47,7 +49,7 @@ describe('/api/auth/refresh', () => {
     delete process.env.JWT_SECRET
   })
 
-  it('returns a new access token for a valid refresh token cookie', async () => {
+  it('returns a new access token and rotates the refresh token cookie', async () => {
     const refreshToken = 'refresh-token-value'
 
     mockDb.refreshToken.findUnique.mockResolvedValue({
@@ -63,9 +65,11 @@ describe('/api/auth/refresh', () => {
         isActive: true,
       },
     } as never)
+    mockDb.refreshToken.update.mockResolvedValue({} as never)
 
     const response = await refreshPOST(cookieRequest('http://localhost/api/auth/refresh', refreshToken) as never)
     const payload = await response.json()
+    const setCookie = response.headers.get('set-cookie') || ''
 
     expect(response.status).toBe(200)
     expect(mockDb.refreshToken.findUnique).toHaveBeenCalledWith({
@@ -74,12 +78,25 @@ describe('/api/auth/refresh', () => {
       },
       include: expect.any(Object),
     })
+    expect(mockDb.refreshToken.update).toHaveBeenCalledWith({
+      where: {
+        hashedToken: hashRefreshToken(refreshToken),
+      },
+      data: expect.objectContaining({
+        hashedToken: expect.any(String),
+        expiresAt: expect.any(Date),
+        revoked: false,
+      }),
+    })
+    expect(mockDb.refreshToken.update.mock.calls[0][0].data.hashedToken).not.toBe(hashRefreshToken(refreshToken))
     expect(payload.success).toBe(true)
     expect(payload.expiresIn).toBe('15m')
     expect(verifyAuthToken(payload.token)).toEqual({
       userId: 'user-1',
       role: 'admin',
     })
+    expect(setCookie).toContain(`${REFRESH_TOKEN_COOKIE_NAME}=`)
+    expect(setCookie).not.toContain('Max-Age=0')
   })
 
   it('returns 401 and clears the cookie for missing or invalid refresh tokens', async () => {

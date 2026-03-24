@@ -12,27 +12,16 @@ import {
   MessageRole 
 } from '@/types'
 import { vectorStoreService } from './vector-store-service'
-import ZAI from 'z-ai-web-dev-sdk'
+import { llmProviderRegistry } from './llm-provider-registry'
 
 // ==================== Chat Service Class ====================
 
 export class ChatService {
-  private zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
-
-  async initialize() {
-    if (!this.zai) {
-      this.zai = await ZAI.create()
-    }
-    return this.zai
-  }
-
   /**
    * Process a chat message and return AI response with RAG
    */
   async processMessage(request: ChatRequest): Promise<ChatResponse> {
     try {
-      await this.initialize()
-      
       // Create or get session
       let sessionId = request.sessionId
       if (!sessionId) {
@@ -59,17 +48,17 @@ export class ChatService {
       const systemPrompt = this.buildSystemPrompt(request.audience || 'General Public', context)
 
       // Call the LLM
-      const completion = await this.zai!.chat.completions.create({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: request.message }
-        ],
-        temperature: 0.7,
-        max_tokens: 2000
-      })
-
-      const assistantResponse = completion.choices[0]?.message?.content || 
-        'I apologize, but I was unable to generate a response. Please try again.'
+      let assistantResponse: string
+      try {
+        const { content } = await llmProviderRegistry.chat(
+          systemPrompt,
+          request.message,
+          { temperature: 0.7, maxTokens: 2000 }
+        )
+        assistantResponse = content || 'I apologize, but I was unable to generate a response. Please try again.'
+      } catch {
+        assistantResponse = 'I apologize, but I was unable to generate a response. Please try again.'
+      }
 
       // Format sources
       const sources: SourceReference[] = searchResults.length > 0

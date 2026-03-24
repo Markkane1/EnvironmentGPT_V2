@@ -3,7 +3,16 @@ const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "..");
 const envPath = path.join(repoRoot, ".env");
-const defaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/environmentgpt?schema=public";
+
+function getDefaultDatabaseUrl() {
+  const user = process.env.POSTGRES_USER || "postgres";
+  const password = process.env.POSTGRES_PASSWORD || "postgres";
+  const host = process.env.POSTGRES_HOST || "127.0.0.1";
+  const port = process.env.POSTGRES_PORT || "5432";
+  const database = process.env.POSTGRES_DB || "environmentgpt";
+
+  return `postgresql://${user}:${password}@${host}:${port}/${database}?schema=public`;
+}
 
 function parseEnvFile(contents) {
   const parsed = {};
@@ -26,6 +35,7 @@ function parseEnvFile(contents) {
 }
 
 function ensureDotEnv() {
+  const defaultDatabaseUrl = getDefaultDatabaseUrl();
   const exists = fs.existsSync(envPath);
   const contents = exists ? fs.readFileSync(envPath, "utf8") : "";
   const env = parseEnvFile(contents);
@@ -48,7 +58,7 @@ function assertPostgresDatabaseUrl(databaseUrl) {
 
   if (databaseUrl.startsWith("file:")) {
     throw new Error(
-      "SQLite DATABASE_URL detected. Update DATABASE_URL to PostgreSQL, for example postgresql://postgres:postgres@127.0.0.1:5432/environmentgpt?schema=public.",
+      "SQLite DATABASE_URL detected. Update DATABASE_URL to PostgreSQL, for example postgresql://postgres:<password>@127.0.0.1:5432/environmentgpt?schema=public.",
     );
   }
 }

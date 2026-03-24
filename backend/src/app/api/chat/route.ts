@@ -1,7 +1,7 @@
 // =====================================================
 // EPA Punjab EnvironmentGPT - Enhanced Chat API
 // Phase 4, 5 & 8+: Advanced RAG + Dynamic LLM Routing
-// Uses vLLM with fallback chain (Qwen3-30B → Mistral → Qwen3-8B)
+// Uses vLLM with fallback chain (Qwen3-30B -> Mistral -> Qwen3-8B)
 // =====================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,14 +18,13 @@ import { chatMessageSchema, createValidationErrorResponse } from '@/lib/validato
 import type { ChatResponse } from '@/types'
 import { getRouteAuthContext } from '@/lib/route-middleware'
 
-// Knowledge base for environmental topics (fallback)
 const ENVIRONMENTAL_KNOWLEDGE = [
   {
     id: 'air-quality',
     title: 'Air Quality Management in Punjab',
     category: 'Air Quality',
-    content: `Air quality in Punjab is monitored through a network of stations measuring PM2.5, PM10, NOx, SO2, and Ozone. 
-Key challenges include vehicular emissions, industrial pollution, and stubble burning. 
+    content: `Air quality in Punjab is monitored through a network of stations measuring PM2.5, PM10, NOx, SO2, and Ozone.
+Key challenges include vehicular emissions, industrial pollution, and stubble burning.
 EPA Punjab implements the Punjab Clean Air Action Plan which includes:
 - Vehicle emission testing programs
 - Industrial emission standards enforcement
@@ -87,7 +86,7 @@ Threatened species in Punjab include:
     title: 'Climate Change Adaptation and Mitigation',
     category: 'Climate Change',
     content: `Punjab faces significant climate change impacts including:
-- Rising temperatures (average increase of 0.5°C per decade)
+- Rising temperatures (average increase of 0.5C per decade)
 - Changing precipitation patterns
 - Increased frequency of extreme weather events
 - Glacier melt affecting water availability
@@ -162,56 +161,50 @@ Penalties for violations:
   }
 ]
 
-// Retrieve relevant documents using semantic search
 async function retrieveRelevantDocuments(
-  query: string, 
-  category?: string, 
+  query: string,
+  category?: string,
   topK: number = 3
 ): Promise<typeof ENVIRONMENTAL_KNOWLEDGE> {
-  // First, try to retrieve from database chunks using advanced embedding
   if (process.env.PLAYWRIGHT_TEST !== '1') {
     try {
       const retrievalResult = await advancedEmbeddingService.retrieveRelevantChunks(
-        query, 
+        query,
         topK,
         0.5,
         { category, useHybrid: true }
       )
-      
+
       if (retrievalResult.chunks.length > 0) {
-        // Get document details for chunks
-        const documentIds = [...new Set(retrievalResult.chunks.map(c => c.documentId))]
+        const documentIds = [...new Set(retrievalResult.chunks.map((chunk) => chunk.documentId))]
         const documents = await db.document.findMany({
           where: { id: { in: documentIds } }
         })
-        
-        return documents.map(doc => ({
+
+        return documents.map((doc) => ({
           id: doc.id,
           title: doc.title,
           category: doc.category || 'General',
-          content: doc.content.slice(0, 2000) // Limit content size
+          content: doc.content.slice(0, 2000)
         }))
       }
     } catch {
       console.error('Vector retrieval failed, falling back to keyword search')
     }
   }
-  
-  // Fallback to keyword-based search on in-memory knowledge
+
   const processedQuery = queryProcessorService.processQuery(query)
   const queryLower = processedQuery.cleaned
   const queryTerms = queryLower.split(/\s+/)
-  
-  const scored = ENVIRONMENTAL_KNOWLEDGE.map(doc => {
-    // Filter by category if specified
+
+  const scored = ENVIRONMENTAL_KNOWLEDGE.map((doc) => {
     if (category && doc.category !== category) {
       return { doc, score: 0 }
     }
 
-    const contentLower = (doc.title + ' ' + doc.content).toLowerCase()
+    const contentLower = `${doc.title} ${doc.content}`.toLowerCase()
     let score = 0
-    
-    // Term frequency scoring
+
     for (const term of queryTerms) {
       if (term.length < 3) continue
       const regex = new RegExp(term, 'gi')
@@ -220,30 +213,27 @@ async function retrieveRelevantDocuments(
         score += matches.length
       }
     }
-    
-    // Boost for title match
+
     if (doc.title.toLowerCase().includes(queryLower)) {
       score += 20
     }
-    
-    // Boost for category match
+
     if (doc.category && queryLower.includes(doc.category.toLowerCase())) {
       score += 10
     }
-    
-    // Boost for detected category from query processor
+
     if (processedQuery.category && doc.category === processedQuery.category) {
       score += 15
     }
-    
+
     return { doc, score }
   })
-  
+
   return scored
-    .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
     .slice(0, topK)
-    .map(s => s.doc)
+    .map((item) => item.doc)
 }
 
 function summarizeFallbackContent(content: string, maxLength: number = 220): string {
@@ -260,38 +250,81 @@ function buildOfflineFallbackResponse(
   relevantDocs: Array<{ title: string; category: string; content: string }>,
   audience: string
 ): string {
-  const modeNote =
-    audience === 'Technical'
-      ? 'Technical note: the live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base.'
-      : audience === 'Policy Maker'
-        ? 'Policy note: the live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base. Verify current legal thresholds before operational use.'
-        : 'The live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base.'
+  const modeNote = audience === 'Technical'
+    ? 'Technical note: the live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base.'
+    : audience === 'Policy Maker'
+      ? 'Policy note: the live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base. Verify current legal thresholds before operational use.'
+      : 'The live LLM providers are unavailable, so this answer is a deterministic summary from the local knowledge base.'
 
   if (relevantDocs.length === 0) {
-    return `${modeNote}
-
-I could not find a strong local document match for "${message}". Try asking about air quality, water quality, climate change, biodiversity, waste management, or environmental regulations in Punjab.`
+    return `${modeNote}\n\nI could not find a strong local document match for "${message}". Try asking about air quality, water quality, climate change, biodiversity, waste management, or environmental regulations in Punjab.`
   }
 
   const documentSummaries = relevantDocs
     .slice(0, 3)
-    .map((doc, index) => {
-      return `${index + 1}. ${doc.title} (${doc.category}): ${summarizeFallbackContent(doc.content)}`
-    })
+    .map((doc, index) => `${index + 1}. ${doc.title} (${doc.category}): ${summarizeFallbackContent(doc.content)}`)
     .join('\n')
 
-  return `${modeNote}
+  return `${modeNote}\n\nRelevant information for "${message}":\n${documentSummaries}\n\nThis response is based on the built-in Punjab environmental knowledge base and any locally indexed documents that matched your query.`
+}
 
-Relevant information for "${message}":
-${documentSummaries}
+function buildRetrievedDocuments(
+  relevantDocs: Array<{ id: string; title: string; category: string; content: string }>
+) {
+  return relevantDocs.map((doc) => ({
+    id: doc.id,
+    title: doc.title,
+    category: doc.category,
+    content: doc.content
+  }))
+}
 
-This response is based on the built-in Punjab environmental knowledge base and any locally indexed documents that matched your query.`
+function buildStreamMetadata(
+  sessionId: string,
+  sources: Array<{ id: string; documentId: string; title: string; category?: string; relevanceScore: number }>,
+  confidence: number,
+  providerUsed: string,
+  modelUsed: string
+) {
+  return {
+    type: 'meta' as const,
+    sessionId,
+    sources,
+    confidence,
+    providerUsed,
+    modelUsed
+  }
+}
+
+function buildTextEventStream(
+  content: string,
+  metadata: ReturnType<typeof buildStreamMetadata>
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder()
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(metadata)}\n\n`))
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+      )
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    }
+  })
 }
 
 async function handlePost(request: NextRequest) {
   const startTime = Date.now()
 
   try {
+    let user: { userId: string; role: string } | undefined
+    if (request.headers.get('authorization')) {
+      const { response: authError, user: authenticatedUser } = await getRouteAuthContext(request, authenticateToken)
+      if (authError) return authError
+      user = authenticatedUser
+    }
+
     const body = await request.json()
     const parsed = chatMessageSchema.safeParse(body)
 
@@ -303,20 +336,23 @@ async function handlePost(request: NextRequest) {
     }
 
     const validatedInput = parsed.data
-    
-    const { message, audience = 'General Public', sessionId, filters } = validatedInput
-    
-    // Process query for understanding
+    const {
+      message,
+      audience = 'General Public',
+      sessionId,
+      filters,
+      stream: streamRequested = false
+    } = validatedInput
+
     const processedQuery = queryProcessorService.processQuery(message)
-    
-    // Check if query is within scope
+
     const scopeCheck = queryProcessorService.isWithinScope(message)
     if (!scopeCheck.inScope) {
       return NextResponse.json({
         success: true,
         response: scopeCheck.reason,
         sources: [],
-        sessionId: sessionId,
+        sessionId,
         timestamp: new Date().toISOString(),
         metadata: {
           outOfScope: true,
@@ -327,74 +363,281 @@ async function handlePost(request: NextRequest) {
         }
       })
     }
-    
-    // Check cache first
+
     const cacheKey = responseCacheService.generateKey({
       query: processedQuery.cleaned,
       audience,
       category: processedQuery.category || filters?.category
     })
-    
-    const cachedResponse = responseCacheService.get(cacheKey)
-    if (cachedResponse) {
-      return NextResponse.json({
-        ...cachedResponse,
-        cached: true,
-        processingTime: Date.now() - startTime
-      })
+
+    if (!streamRequested) {
+      const cachedResponse = responseCacheService.get(cacheKey)
+      if (cachedResponse) {
+        return NextResponse.json({
+          ...cachedResponse,
+          cached: true,
+          processingTime: Date.now() - startTime
+        })
+      }
     }
-    
-    // Retrieve relevant documents (RAG)
+
     const relevantDocs = await retrieveRelevantDocuments(
-      processedQuery.expanded, // Use expanded query for better retrieval
+      processedQuery.expanded,
       filters?.category || processedQuery.suggestedFilters.category,
       5
     )
-    
-    // Get conversation history if session exists
+
     let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
     if (sessionId) {
-      const context_data = await conversationMemoryService.getConversationContext(sessionId)
-      conversationHistory = context_data.messages
-        .filter((message): message is typeof message & { role: 'user' | 'assistant' } => (
-          message.role === 'user' || message.role === 'assistant'
+      const contextData = await conversationMemoryService.getConversationContext(sessionId)
+      conversationHistory = contextData.messages
+        .filter((historyMessage): historyMessage is typeof historyMessage & { role: 'user' | 'assistant' } => (
+          historyMessage.role === 'user' || historyMessage.role === 'assistant'
         ))
         .slice(-10)
-        .map((m) => ({
-          role: m.role,
-          content: m.content
+        .map((historyMessage) => ({
+          role: historyMessage.role,
+          content: historyMessage.content
         }))
     }
-    
-    // ========================================
-    // Use LLM Router with Dynamic Provider Chain
-    // This uses vLLM with fallback chain:
-    // Primary: Qwen3-30B-A3B → Fallback 1: Mistral Small 3.1 → Fallback 2: Qwen3-8B
-    // ========================================
-    
-    // Check if any providers are configured
+
     const providers = await llmProviderRegistry.getProviders()
     const hasConfiguredProviders = providers.length > 0
-    
+    const retrievedDocuments = buildRetrievedDocuments(relevantDocs)
+    const confidence = relevantDocs.length > 0
+      ? Math.min(0.5 + (relevantDocs.length * 0.1), 0.95)
+      : 0.4
+
+    const sources = relevantDocs.map((doc) => ({
+      id: doc.id,
+      documentId: doc.id,
+      title: doc.title,
+      category: doc.category || undefined,
+      relevanceScore: confidence
+    }))
+
+    if (streamRequested) {
+      let currentSessionId = sessionId
+      if (!currentSessionId) {
+        const session = await db.chatSession.create({
+          data: {
+            title: message.slice(0, 50),
+            userId: user?.userId || null
+          }
+        })
+        currentSessionId = session.id
+      }
+
+      const streamHeaders = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Session-Id': currentSessionId
+      }
+
+      if (!hasConfiguredProviders) {
+        const fallbackResponse = buildOfflineFallbackResponse(message, relevantDocs, audience)
+        await conversationMemoryService.addMessage(currentSessionId, 'user', message)
+        await conversationMemoryService.addMessage(
+          currentSessionId,
+          'assistant',
+          fallbackResponse,
+          JSON.stringify(sources),
+          {
+            confidence,
+            category: processedQuery.category ?? undefined,
+            intent: processedQuery.intent.type,
+            providerUsed: 'local-fallback',
+            modelUsed: 'knowledge-base'
+          }
+        )
+
+        return new Response(
+          buildTextEventStream(
+            fallbackResponse,
+            buildStreamMetadata(currentSessionId, sources, confidence, 'local-fallback', 'knowledge-base')
+          ),
+          {
+            headers: {
+              ...streamHeaders,
+              'X-Provider-Used': 'local-fallback',
+              'X-Model-Used': 'knowledge-base'
+            }
+          }
+        )
+      }
+
+      try {
+        const { stream, providerUsed, modelUsed } = await llmRouter.streamQuery({
+          query: message,
+          sessionId: currentSessionId,
+          audienceType: audience as 'General Public' | 'Technical' | 'Policy Maker',
+          category: processedQuery.category ?? undefined,
+          conversationHistory,
+          retrievedDocuments
+        })
+
+        let fullResponse = ''
+        let sseBuffer = ''
+        const decoder = new TextDecoder()
+        const encoder = new TextEncoder()
+
+        const consumeSseBuffer = (flush: boolean = false) => {
+          const delimiter = '\n\n'
+          let boundaryIndex = sseBuffer.indexOf(delimiter)
+
+          while (boundaryIndex !== -1) {
+            const eventBlock = sseBuffer.slice(0, boundaryIndex)
+            sseBuffer = sseBuffer.slice(boundaryIndex + delimiter.length)
+
+            for (const line of eventBlock.split('\n')) {
+              if (!line.startsWith('data: ')) continue
+              const data = line.slice(6).trim()
+              if (!data || data === '[DONE]') continue
+
+              try {
+                const parsedLine = JSON.parse(data)
+                const delta = parsedLine.choices?.[0]?.delta?.content
+                if (delta) {
+                  fullResponse += delta
+                }
+              } catch {
+                // Ignore malformed chunks while preserving the stream.
+              }
+            }
+
+            boundaryIndex = sseBuffer.indexOf(delimiter)
+          }
+
+          if (flush && sseBuffer.trim()) {
+            const remaining = sseBuffer
+            sseBuffer = ''
+            for (const line of remaining.split('\n')) {
+              if (!line.startsWith('data: ')) continue
+              const data = line.slice(6).trim()
+              if (!data || data === '[DONE]') continue
+
+              try {
+                const parsedLine = JSON.parse(data)
+                const delta = parsedLine.choices?.[0]?.delta?.content
+                if (delta) {
+                  fullResponse += delta
+                }
+              } catch {
+                // Ignore malformed chunks while preserving the stream.
+              }
+            }
+          }
+        }
+
+        const wrappedStream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const reader = stream.getReader()
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify(buildStreamMetadata(currentSessionId!, sources, confidence, providerUsed, modelUsed))}\n\n`
+              )
+            )
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                if (!value) continue
+
+                controller.enqueue(value)
+                sseBuffer += decoder.decode(value, { stream: true })
+                consumeSseBuffer(false)
+              }
+
+              sseBuffer += decoder.decode()
+              consumeSseBuffer(true)
+
+              await conversationMemoryService.addMessage(currentSessionId!, 'user', message)
+              await conversationMemoryService.addMessage(
+                currentSessionId!,
+                'assistant',
+                fullResponse,
+                JSON.stringify(sources),
+                {
+                  confidence,
+                  category: processedQuery.category ?? undefined,
+                  intent: processedQuery.intent.type,
+                  providerUsed,
+                  modelUsed
+                }
+              )
+
+              controller.close()
+            } catch (error) {
+              console.error('[Chat] Failed to process streamed response:', error)
+              controller.error(error)
+            } finally {
+              reader.releaseLock()
+            }
+          }
+        })
+
+        return new Response(wrappedStream, {
+          headers: {
+            ...streamHeaders,
+            'X-Provider-Used': providerUsed,
+            'X-Model-Used': modelUsed
+          }
+        })
+      } catch (error) {
+        console.error('[Chat] Streaming provider path failed, using local fallback:', error)
+        const fallbackResponse = buildOfflineFallbackResponse(message, relevantDocs, audience)
+
+        await conversationMemoryService.addMessage(currentSessionId, 'user', message)
+        await conversationMemoryService.addMessage(
+          currentSessionId,
+          'assistant',
+          fallbackResponse,
+          JSON.stringify(sources),
+          {
+            confidence,
+            category: processedQuery.category ?? undefined,
+            intent: processedQuery.intent.type,
+            providerUsed: 'local-fallback',
+            modelUsed: 'knowledge-base'
+          }
+        )
+
+        return new Response(
+          buildTextEventStream(
+            fallbackResponse,
+            buildStreamMetadata(currentSessionId, sources, confidence, 'local-fallback', 'knowledge-base')
+          ),
+          {
+            headers: {
+              ...streamHeaders,
+              'X-Provider-Used': 'local-fallback',
+              'X-Model-Used': 'knowledge-base'
+            }
+          }
+        )
+      }
+    }
+
     let assistantResponse: string
     let providerUsed = 'unknown'
     let modelUsed = 'unknown'
     let latencyMs = 0
     let fallbackChain: string[] | undefined
-    
+
     if (hasConfiguredProviders) {
-      // Use dynamic LLM Router with fallback chain
       const routerResult = await llmRouter.processQuery({
         query: message,
         sessionId,
         audienceType: audience as 'General Public' | 'Technical' | 'Policy Maker',
         category: processedQuery.category ?? undefined,
-        conversationHistory
+        conversationHistory,
+        retrievedDocuments
       })
-      
+
       if (!routerResult.success) {
         console.error('[Chat] LLM Router failed, using local fallback')
-
         assistantResponse = buildOfflineFallbackResponse(message, relevantDocs, audience)
         providerUsed = 'local-fallback'
         modelUsed = 'knowledge-base'
@@ -413,39 +656,21 @@ async function handlePost(request: NextRequest) {
       modelUsed = 'knowledge-base'
       latencyMs = Date.now() - startTime
     }
-    
-    // Calculate confidence score
-    const confidence = relevantDocs.length > 0 
-      ? Math.min(0.5 + (relevantDocs.length * 0.1), 0.95)
-      : 0.4
-    
-    // Format sources with confidence
-    const sources = relevantDocs.map(doc => ({
-      id: doc.id,
-      documentId: doc.id,
-      title: doc.title,
-      category: doc.category || undefined,
-      relevanceScore: confidence
-    }))
-    
-    // Handle session
+
     let currentSessionId = sessionId
-    
     if (!currentSessionId) {
       const session = await db.chatSession.create({
-        data: { title: message.slice(0, 50) }
+        data: {
+          title: message.slice(0, 50),
+          userId: user?.userId || null
+        }
       })
       currentSessionId = session.id
     }
-    
-    // Save messages to database using conversation memory service
-    await conversationMemoryService.addMessage(
-      currentSessionId,
-      'user',
-      message
-    )
-    
-    const assistantMsg = await conversationMemoryService.addMessage(
+
+    await conversationMemoryService.addMessage(currentSessionId, 'user', message)
+
+    const assistantMessage = await conversationMemoryService.addMessage(
       currentSessionId,
       'assistant',
       assistantResponse,
@@ -458,14 +683,13 @@ async function handlePost(request: NextRequest) {
         modelUsed
       }
     )
-    
-    // Build response
+
     const response: ChatResponse = {
       success: true,
       response: assistantResponse,
       sources,
       sessionId: currentSessionId,
-      messageId: assistantMsg?.id,
+      messageId: assistantMessage?.id,
       timestamp: new Date(),
       confidence,
       metadata: {
@@ -484,17 +708,15 @@ async function handlePost(request: NextRequest) {
         }
       }
     }
-    
-    // Cache the response
+
     responseCacheService.set(cacheKey, response, {
       query: processedQuery.cleaned,
       audience,
       category: processedQuery.category ?? undefined,
       documentCount: relevantDocs.length
     })
-    
+
     return NextResponse.json(response)
-    
   } catch {
     console.error('Chat API error')
 
@@ -505,7 +727,6 @@ async function handlePost(request: NextRequest) {
   }
 }
 
-// Get session history
 async function handleGet(request: NextRequest) {
   const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
   if (authError || !user) return authError
@@ -513,7 +734,7 @@ async function handleGet(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get('sessionId')
-    
+
     if (sessionId) {
       const session = await db.chatSession.findUnique({
         where: { id: sessionId },
@@ -539,7 +760,7 @@ async function handleGet(request: NextRequest) {
       }
 
       const context = await conversationMemoryService.getConversationContext(sessionId)
-      
+
       return NextResponse.json({
         success: true,
         session: {
@@ -548,33 +769,32 @@ async function handleGet(request: NextRequest) {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           summary: context.summary,
-          messages: session.messages.map(msg => ({
-            id: msg.id,
-            sessionId: msg.sessionId,
-            role: msg.role,
-            content: msg.content,
-            sources: msg.sources ? JSON.parse(msg.sources) : undefined,
-            createdAt: msg.createdAt
+          messages: session.messages.map((message) => ({
+            id: message.id,
+            sessionId: message.sessionId,
+            role: message.role,
+            content: message.content,
+            sources: message.sources ? JSON.parse(message.sources) : undefined,
+            createdAt: message.createdAt
           }))
         }
       })
     }
-    
-    // Get recent sessions
+
     const recentConversations = await conversationMemoryService.getRecentConversations(
       20,
       user.role === 'admin' ? undefined : user.userId
     )
-    
+
     return NextResponse.json({
       success: true,
-      sessions: recentConversations.map(conv => ({
-        id: conv.id,
-        title: conv.title,
-        createdAt: conv.lastMessage,
-        updatedAt: conv.lastMessage,
-        preview: conv.preview,
-        messageCount: conv.messageCount
+      sessions: recentConversations.map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title,
+        createdAt: conversation.lastMessage,
+        updatedAt: conversation.lastMessage,
+        preview: conversation.preview,
+        messageCount: conversation.messageCount
       }))
     })
   } catch {
@@ -586,7 +806,6 @@ async function handleGet(request: NextRequest) {
   }
 }
 
-// Delete session
 async function handleDelete(request: NextRequest) {
   const { response: authError, user } = await getRouteAuthContext(request, authenticateToken)
   if (authError || !user) return authError
@@ -594,14 +813,14 @@ async function handleDelete(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get('id')
-    
+
     if (!sessionId) {
       return NextResponse.json(
         { success: false, error: 'Session ID is required' },
         { status: 400 }
       )
     }
-    
+
     const session = await db.chatSession.findUnique({
       where: { id: sessionId },
       select: { id: true, userId: true }
@@ -622,14 +841,14 @@ async function handleDelete(request: NextRequest) {
     }
 
     const deleted = await conversationMemoryService.deleteConversation(sessionId)
-    
+
     if (!deleted) {
       return NextResponse.json(
         { success: false, error: 'Failed to delete session' },
         { status: 500 }
       )
     }
-    
+
     return NextResponse.json({ success: true })
   } catch {
     console.error('Delete session error')
@@ -639,7 +858,6 @@ async function handleDelete(request: NextRequest) {
     )
   }
 }
-
 
 export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'chat')
 export const GET = withRateLimit((request) => handleGet(request as NextRequest), 'chat')

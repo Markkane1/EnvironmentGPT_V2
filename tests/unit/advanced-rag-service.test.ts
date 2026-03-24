@@ -6,19 +6,18 @@
 import { EnhancedRAGService } from '@/lib/services/advanced-rag-service'
 import { ChatResponse } from '@/types'
 
-const mockCompletionCreate = jest.fn()
+const mockChatCompletion = jest.fn()
 
-jest.mock('z-ai-web-dev-sdk', () => ({
-  __esModule: true,
-  default: {
-    create: jest.fn(),
+jest.mock('@/lib/services/llm-provider-registry', () => ({
+  llmProviderRegistry: {
+    chatCompletion: jest.fn(),
   },
 }))
 
 jest.mock('@/lib/db', () => ({
   db: {
     document: {
-      findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
     chatMessage: {
       findMany: jest.fn(),
@@ -54,9 +53,9 @@ jest.mock('@/lib/services/response-cache', () => ({
 
 import { db } from '@/lib/db'
 import { advancedEmbeddingService } from '@/lib/services/advanced-embedding-service'
+import { llmProviderRegistry } from '@/lib/services/llm-provider-registry'
 import { queryProcessorService } from '@/lib/services/query-processor'
 import { responseCacheService } from '@/lib/services/response-cache'
-import ZAI from 'z-ai-web-dev-sdk'
 
 describe('EnhancedRAGService', () => {
   let ragService: EnhancedRAGService
@@ -65,16 +64,12 @@ describe('EnhancedRAGService', () => {
     ragService = new EnhancedRAGService()
     jest.clearAllMocks()
 
-    mockCompletionCreate.mockResolvedValue({
-      choices: [{ message: { content: 'Generated environmental response.' } }],
-    })
-    ;(ZAI.create as jest.Mock).mockResolvedValue({
-      chat: {
-        completions: {
-          create: mockCompletionCreate,
-        },
+    mockChatCompletion.mockResolvedValue({
+      response: {
+        choices: [{ message: { content: 'Generated environmental response.' } }],
       },
     })
+    ;(llmProviderRegistry.chatCompletion as jest.Mock).mockImplementation(mockChatCompletion)
 
     ;(queryProcessorService.processQuery as jest.Mock).mockReturnValue({
       original: 'What is air quality in Lahore?',
@@ -108,13 +103,15 @@ describe('EnhancedRAGService', () => {
       totalTokens: 10,
       retrievalTime: 5,
     })
-    ;(db.document.findUnique as jest.Mock).mockResolvedValue({
-      id: 'doc-1',
-      title: 'Air Quality Report',
-      category: 'Air Quality',
-      year: 2024,
-      source: 'report.pdf',
-    })
+    ;(db.document.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'doc-1',
+        title: 'Air Quality Report',
+        category: 'Air Quality',
+        year: 2024,
+        source: 'report.pdf',
+      },
+    ])
     ;(db.chatMessage.findMany as jest.Mock).mockResolvedValue([])
     ;(db.chatMessage.create as jest.Mock).mockResolvedValue({
       id: 'message-1',
@@ -137,7 +134,7 @@ describe('EnhancedRAGService', () => {
 
       expect(result.response.success).toBe(true)
       expect(result.response.response).toBe('Outside scope')
-      expect(mockCompletionCreate).not.toHaveBeenCalled()
+      expect(mockChatCompletion).not.toHaveBeenCalled()
     })
 
     it('returns cached responses when available', async () => {
@@ -158,7 +155,7 @@ describe('EnhancedRAGService', () => {
       expect(result.response).toEqual(cachedResponse)
       expect(result.metadata.cachedResponse).toBe(true)
       expect(advancedEmbeddingService.retrieveRelevantChunks).not.toHaveBeenCalled()
-      expect(mockCompletionCreate).not.toHaveBeenCalled()
+      expect(mockChatCompletion).not.toHaveBeenCalled()
     })
 
     it('retrieves context, calls the model, and caches successful responses', async () => {
@@ -182,7 +179,21 @@ describe('EnhancedRAGService', () => {
           useHybrid: true,
         })
       )
-      expect(mockCompletionCreate).toHaveBeenCalled()
+      expect(db.document.findMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: ['doc-1'],
+          },
+        },
+        select: {
+          id: true,
+          title: true,
+          category: true,
+          year: true,
+          source: true,
+        },
+      })
+      expect(mockChatCompletion).toHaveBeenCalled()
       expect(responseCacheService.set).toHaveBeenCalled()
     })
   })

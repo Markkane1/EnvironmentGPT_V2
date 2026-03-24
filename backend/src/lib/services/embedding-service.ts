@@ -1,25 +1,18 @@
 // =====================================================
 // EPA Punjab EnvironmentGPT - Embedding Service
 // Phase 2: Vector Embedding Generation & Management
+// Internal compatibility layer for ingestion/vector operations
 // =====================================================
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { llmProviderRegistry } from './llm-provider-registry'
 import type { ChunkMetadata, RetrievalResult } from '@/types'
 import { RAG_CONFIG } from '@/lib/constants'
 
 // ==================== Embedding Service Class ====================
 
 export class EmbeddingService {
-  private zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
   private cache: Map<string, number[]> = new Map()
-  
-  async initialize() {
-    if (!this.zai) {
-      this.zai = await ZAI.create()
-    }
-    return this.zai
-  }
 
   /**
    * Generate embedding for a single text
@@ -32,24 +25,43 @@ export class EmbeddingService {
     }
 
     try {
-      await this.initialize()
-      
-      // Use ZAI for embedding generation
-      // Note: The actual embedding API depends on the SDK capabilities
-      // For now, we'll use a simple hash-based pseudo-embedding
-      // In production, this should use a real embedding model
-      
-      const embedding = await this.generatePseudoEmbedding(text)
-      
-      // Cache the result
-      this.cache.set(cacheKey, embedding)
-      
-      return embedding
-    } catch (error) {
-      console.error('Failed to generate embedding:', error)
-      // Return a zero vector as fallback
-      return new Array(384).fill(0)
+      // Try the primary provider's /v1/embeddings endpoint
+      const providers = await llmProviderRegistry.getProviderChain()
+      const provider = providers[0]
+      if (!provider) throw new Error('No provider available')
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (provider.apiKeyEnvVar) {
+        const apiKey = process.env[provider.apiKeyEnvVar]
+        if (apiKey) {
+          if (provider.providerType === 'azure') {
+            headers['api-key'] = apiKey
+          } else {
+            headers.Authorization = `Bearer ${apiKey}`
+          }
+        }
+      }
+
+      const response = await fetch(`${provider.baseUrl}/v1/embeddings`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: provider.modelId, input: text })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const embedding = data.data[0].embedding as number[]
+        this.cache.set(cacheKey, embedding)
+        return embedding
+      }
+    } catch {
+      console.warn('[EmbeddingService] Provider embedding failed, using semantic hash fallback')
     }
+
+    // Fallback to deterministic pseudo-embedding
+    const embedding = await this.generatePseudoEmbedding(text)
+    this.cache.set(cacheKey, embedding)
+    return embedding
   }
 
   /**

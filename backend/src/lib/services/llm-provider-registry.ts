@@ -8,7 +8,7 @@ import { db } from '@/lib/db'
 // ==================== Types ====================
 
 export type ProviderRole = 'primary' | 'fallback_1' | 'fallback_2' | 'available' | 'disabled'
-export type ProviderType = 'openai_compat' | 'ollama'
+export type ProviderType = 'openai_compat' | 'ollama' | 'azure'
 export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown'
 
 export interface LLMProviderConfig {
@@ -152,6 +152,7 @@ class LLMProviderRegistryService {
   private providers: Map<string, LLMProviderConfig> = new Map()
   private lastRefresh: Date | null = null
   private refreshIntervalMs = 60000
+  private healthCheckTtlMs = 30000
 
   private mapProvider(provider: StoredProviderRecord): LLMProviderConfig {
     return {
@@ -197,7 +198,11 @@ class LLMProviderRegistryService {
 
     const apiKey = this.getApiKey(provider)
     if (apiKey) {
-      headers.Authorization = `Bearer ${apiKey}`
+      if (provider.providerType === 'azure') {
+        headers['api-key'] = apiKey
+      } else {
+        headers.Authorization = `Bearer ${apiKey}`
+      }
     }
 
     return headers
@@ -372,19 +377,55 @@ class LLMProviderRegistryService {
     }
   }
 
+  private shouldRefreshHealth(provider: LLMProviderConfig, force = false): boolean {
+    if (force) return true
+    if (provider.healthStatus !== 'healthy') return true
+    if (!provider.lastHealthCheck) return true
+
+    return Date.now() - provider.lastHealthCheck.getTime() > this.healthCheckTtlMs
+  }
+
+  private async ensureProviderHealth(
+    provider: LLMProviderConfig,
+    options?: { force?: boolean }
+  ): Promise<ProviderHealthCheck> {
+    if (!this.shouldRefreshHealth(provider, options?.force)) {
+      return {
+        healthy: true,
+        latencyMs: provider.avgLatencyMs ?? null,
+      }
+    }
+
+    const health = await this.pingProvider(provider)
+    await this.setProviderHealth(provider.id, health)
+    return health
+  }
+
   private async setProviderHealth(
     providerId: string,
     health: ProviderHealthCheck
   ): Promise<void> {
+    const checkedAt = new Date()
+
     try {
       await db.lLMProvider.update({
         where: { id: providerId },
         data: {
           healthStatus: health.healthy ? 'healthy' : 'unhealthy',
-          lastHealthCheck: new Date(),
+          lastHealthCheck: checkedAt,
           avgLatencyMs: health.healthy && health.latencyMs !== null ? health.latencyMs : undefined,
         },
       })
+
+      const cached = this.providers.get(providerId)
+      if (cached) {
+        this.providers.set(providerId, {
+          ...cached,
+          healthStatus: health.healthy ? 'healthy' : 'unhealthy',
+          lastHealthCheck: checkedAt,
+          avgLatencyMs: health.healthy && health.latencyMs !== null ? health.latencyMs : cached.avgLatencyMs,
+        })
+      }
     } catch (error) {
       console.error('[LLM Registry] Failed to update health state:', error)
     }
@@ -430,14 +471,6 @@ class LLMProviderRegistryService {
     for (const provider of providerChain) {
       fallbackChain.push(provider.name)
 
-      const health = await this.pingProvider(provider)
-      await this.setProviderHealth(provider.id, health)
-
-      if (!health.healthy) {
-        lastError = health.error
-        continue
-      }
-
       try {
         const { response, latencyMs } = await this.makeRequest(provider, request)
         await this.updateProviderStats(provider.id, true, latencyMs)
@@ -468,6 +501,61 @@ class LLMProviderRegistryService {
       error: `All providers failed. Last error: ${lastError}`,
       fallbackChain,
     }
+  }
+
+  async streamChatCompletion(request: ChatCompletionRequest): Promise<{
+    stream: ReadableStream<Uint8Array>
+    providerUsed: string
+    modelUsed: string
+  }> {
+    const providerChain = await this.getProviderChain()
+
+    if (providerChain.length === 0) {
+      throw new Error('No active LLM providers configured')
+    }
+
+    let lastError = ''
+
+    for (const provider of providerChain) {
+      try {
+        const startTime = Date.now()
+        const response = await fetch(this.getCompletionsUrl(provider), {
+          method: 'POST',
+          headers: this.buildHeaders(provider),
+          body: JSON.stringify({
+            ...this.buildRequestBody(provider, request),
+            stream: true,
+          }),
+          signal: AbortSignal.timeout(Math.max(1000, provider.timeoutSeconds * 1000)),
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          lastError = `${provider.name}: ${response.status} ${errorText}`
+          await this.updateProviderStats(provider.id, false, 0)
+          continue
+        }
+
+        if (!response.body) {
+          lastError = `${provider.name}: no response body`
+          await this.updateProviderStats(provider.id, false, 0)
+          continue
+        }
+
+        void this.updateProviderStats(provider.id, true, Date.now() - startTime)
+
+        return {
+          stream: response.body,
+          providerUsed: provider.name,
+          modelUsed: provider.modelId,
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : 'Unknown'
+        await this.updateProviderStats(provider.id, false, 0)
+      }
+    }
+
+    throw new Error(`All providers failed. Last: ${lastError}`)
   }
 
   async chat(
@@ -503,6 +591,8 @@ class LLMProviderRegistryService {
     success: boolean,
     latencyMs: number
   ): Promise<void> {
+    const checkedAt = new Date()
+
     try {
       const provider = await db.lLMProvider.findUnique({
         where: { id: providerId },
@@ -524,9 +614,21 @@ class LLMProviderRegistryService {
           errorCount: newErrorCount,
           avgLatencyMs: newAvgLatency,
           healthStatus: success ? 'healthy' : 'unhealthy',
-          lastHealthCheck: new Date(),
+          lastHealthCheck: checkedAt,
         },
       })
+
+      const cached = this.providers.get(providerId)
+      if (cached) {
+        this.providers.set(providerId, {
+          ...cached,
+          requestCount: newRequestCount,
+          errorCount: newErrorCount,
+          avgLatencyMs: newAvgLatency,
+          healthStatus: success ? 'healthy' : 'unhealthy',
+          lastHealthCheck: checkedAt,
+        })
+      }
     } catch (error) {
       console.error('[LLM Registry] Failed to update stats:', error)
     }
@@ -537,9 +639,8 @@ class LLMProviderRegistryService {
     const results: Record<string, ProviderHealthCheck> = {}
 
     for (const provider of providers) {
-      const health = await this.pingProvider(provider)
+      const health = await this.ensureProviderHealth(provider, { force: true })
       results[provider.name] = health
-      await this.setProviderHealth(provider.id, health)
     }
 
     return results
@@ -556,8 +657,7 @@ class LLMProviderRegistryService {
       }
     }
 
-    const health = await this.pingProvider(provider)
-    await this.setProviderHealth(provider.id, health)
+    const health = await this.ensureProviderHealth(provider, { force: true })
 
     if (!health.healthy) {
       return {
@@ -761,3 +861,7 @@ class LLMProviderRegistryService {
 }
 
 export const llmProviderRegistry = new LLMProviderRegistryService()
+
+
+
+

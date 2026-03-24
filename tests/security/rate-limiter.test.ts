@@ -2,11 +2,13 @@ const envSnapshot = {
   RATE_LIMIT_MAX: process.env.RATE_LIMIT_MAX,
   RATE_LIMIT_WINDOW: process.env.RATE_LIMIT_WINDOW,
   RATE_LIMIT_BLOCK_DURATION: process.env.RATE_LIMIT_BLOCK_DURATION,
+  TRUST_PROXY_HEADERS: process.env.TRUST_PROXY_HEADERS,
 }
 
 process.env.RATE_LIMIT_MAX = '2'
 process.env.RATE_LIMIT_WINDOW = '5000'
 process.env.RATE_LIMIT_BLOCK_DURATION = '8000'
+delete process.env.TRUST_PROXY_HEADERS
 
 const {
   checkRateLimit,
@@ -20,6 +22,7 @@ const {
 describe('rate-limiter', () => {
   afterEach(() => {
     clearRateLimitStore()
+    delete process.env.TRUST_PROXY_HEADERS
   })
 
   afterAll(() => {
@@ -27,6 +30,7 @@ describe('rate-limiter', () => {
     process.env.RATE_LIMIT_MAX = envSnapshot.RATE_LIMIT_MAX
     process.env.RATE_LIMIT_WINDOW = envSnapshot.RATE_LIMIT_WINDOW
     process.env.RATE_LIMIT_BLOCK_DURATION = envSnapshot.RATE_LIMIT_BLOCK_DURATION
+    process.env.TRUST_PROXY_HEADERS = envSnapshot.TRUST_PROXY_HEADERS
   })
 
   it('reads API limits from environment variables', () => {
@@ -68,13 +72,16 @@ describe('rate-limiter', () => {
     expect(payload.retryAfter).toBe(8)
   })
 
-  it('extracts the client identifier from forwarded headers', () => {
+  it('ignores forwarded headers unless proxy trust is enabled', () => {
     const request = new Request('http://localhost/api/test', {
       headers: {
         'x-forwarded-for': '203.0.113.10, 198.51.100.5',
       },
     })
 
+    expect(getClientIdentifier(request)).toBe('unknown')
+
+    process.env.TRUST_PROXY_HEADERS = '1'
     expect(getClientIdentifier(request)).toBe('203.0.113.10')
   })
 

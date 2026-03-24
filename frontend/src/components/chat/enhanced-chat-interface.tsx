@@ -1,17 +1,17 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChatStore } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { 
-  Send, 
-  Bot, 
-  User, 
-  Loader2, 
+import {
+  Send,
+  Bot,
+  User,
+  Loader2,
   BookOpen,
   Sparkles,
   ThumbsUp,
@@ -30,11 +30,13 @@ import { SourcePanel } from './source-panel'
 import { SimpleMarkdown } from '@/components/ui/simple-markdown'
 
 export function EnhancedChatInterface() {
-  const { 
-    messages, 
-    isLoading, 
-    addMessage, 
-    setLoading, 
+  const {
+    messages,
+    isLoading,
+    addMessage,
+    updateMessageContent,
+    updateMessage,
+    setLoading,
     selectedAudience,
     selectedCategory,
     currentSessionId,
@@ -42,7 +44,7 @@ export function EnhancedChatInterface() {
     clearMessages
   } = useChatStore()
   const showSources = useAppSettingsStore((state) => state.settings.showSources)
-  
+
   const [input, setInput] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [activeSources, setActiveSources] = useState<SourceReference[]>([])
@@ -50,10 +52,10 @@ export function EnhancedChatInterface() {
   const [lastConfidence, setLastConfidence] = useState<number>(0)
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, number>>({})
   const [submittingFeedbackId, setSubmittingFeedbackId] = useState<string | null>(null)
+  const [isStreaming, setIsStreaming] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -66,14 +68,9 @@ export function EnhancedChatInterface() {
     }
   }, [showSources])
 
-  // Handle chat submission
-  const handleSubmit = useCallback(async () => {
-    if (!input.trim() || isLoading) return
-
-    const userMessage = input.trim()
-    setInput('')
-    addMessage({ role: 'user', content: userMessage })
+  const requestChatResponse = useCallback(async (userMessage: string) => {
     setLoading(true)
+    setIsStreaming(false)
 
     try {
       const requestBody = {
@@ -86,38 +83,146 @@ export function EnhancedChatInterface() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({ ...requestBody, stream: true })
       })
 
-      const data = await response.json()
+      if (response.ok === false) {
+        throw new Error(`HTTP ${response.status}`)
+      }
 
-      if (data.success) {
-        // Update session ID if new session was created
-        if (data.sessionId && !currentSessionId) {
-          setCurrentSession(data.sessionId)
-        }
-        
-        addMessage({ 
-          role: 'assistant', 
-          content: data.response,
-          sources: data.sources,
-          backendMessageId: data.messageId
+      const contentType = response.headers?.get?.('content-type') || ''
+
+      if (contentType.includes('text/event-stream') && response.body && typeof response.body.getReader === 'function') {
+        const assistantMessageId = addMessage({
+          role: 'assistant',
+          content: '',
+          sources: []
         })
-        
-        // Update active sources and confidence
-        if (showSources && data.sources?.length > 0) {
-          setActiveSources(data.sources)
-          setLastConfidence(data.confidence || 0.5)
-        } else {
-          setActiveSources([])
-          setLastConfidence(0)
+
+        const newSessionId = response.headers?.get?.('x-session-id')
+        if (newSessionId && newSessionId !== 'new' && !currentSessionId) {
+          setCurrentSession(newSessionId)
+        }
+
+        setActiveSources([])
+        setLastConfidence(0)
+        setIsStreaming(true)
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let fullContent = ''
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (!data || data === '[DONE]') continue
+
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.type === 'meta') {
+                const streamedSources = Array.isArray(parsed.sources) ? parsed.sources : []
+                updateMessage(assistantMessageId, {
+                  sources: streamedSources,
+                  backendMessageId: typeof parsed.messageId === 'string' ? parsed.messageId : undefined
+                })
+
+                if (parsed.sessionId && parsed.sessionId !== 'new' && !currentSessionId) {
+                  setCurrentSession(parsed.sessionId)
+                }
+
+                if (showSources && streamedSources.length > 0) {
+                  setActiveSources(streamedSources)
+                  setLastConfidence(typeof parsed.confidence === 'number' ? parsed.confidence : 0.5)
+                }
+
+                continue
+              }
+
+              const delta = parsed.choices?.[0]?.delta?.content
+              if (delta) {
+                fullContent += delta
+                updateMessageContent(assistantMessageId, fullContent)
+              }
+            } catch {
+              // Ignore malformed SSE chunks.
+            }
+          }
+        }
+
+        if (buffer.trim()) {
+          for (const line of buffer.split('\n')) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (!data || data === '[DONE]') continue
+
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.type === 'meta') {
+                const streamedSources = Array.isArray(parsed.sources) ? parsed.sources : []
+                updateMessage(assistantMessageId, {
+                  sources: streamedSources,
+                  backendMessageId: typeof parsed.messageId === 'string' ? parsed.messageId : undefined
+                })
+
+                if (parsed.sessionId && parsed.sessionId !== 'new' && !currentSessionId) {
+                  setCurrentSession(parsed.sessionId)
+                }
+
+                if (showSources && streamedSources.length > 0) {
+                  setActiveSources(streamedSources)
+                  setLastConfidence(typeof parsed.confidence === 'number' ? parsed.confidence : 0.5)
+                }
+
+                continue
+              }
+
+              const delta = parsed.choices?.[0]?.delta?.content
+              if (delta) {
+                fullContent += delta
+                updateMessageContent(assistantMessageId, fullContent)
+              }
+            } catch {
+              // Ignore malformed SSE chunks.
+            }
+          }
         }
       } else {
-        toast({
-          title: 'Error',
-          description: data.error || 'Failed to get response',
-          variant: 'destructive'
-        })
+        const data = await response.json()
+        if (data.success) {
+          if (data.sessionId && !currentSessionId) {
+            setCurrentSession(data.sessionId)
+          }
+
+          addMessage({
+            role: 'assistant',
+            content: data.response,
+            sources: data.sources,
+            backendMessageId: data.messageId
+          })
+
+          if (showSources && data.sources?.length > 0) {
+            setActiveSources(data.sources)
+            setLastConfidence(data.confidence || 0.5)
+          } else {
+            setActiveSources([])
+            setLastConfidence(0)
+          }
+        } else {
+          toast({
+            title: 'Error',
+            description: data.error || 'Failed to get response',
+            variant: 'destructive'
+          })
+        }
       }
     } catch {
       toast({
@@ -126,25 +231,42 @@ export function EnhancedChatInterface() {
         variant: 'destructive'
       })
     } finally {
+      setIsStreaming(false)
       setLoading(false)
     }
-  }, [input, isLoading, addMessage, setLoading, selectedAudience, selectedCategory, currentSessionId, setCurrentSession, showSources])
+  }, [
+    addMessage,
+    currentSessionId,
+    selectedAudience,
+    selectedCategory,
+    setCurrentSession,
+    setLoading,
+    showSources,
+    updateMessage,
+    updateMessageContent
+  ])
 
-  // Keyboard shortcuts
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
+  const handleSubmit = useCallback(async () => {
+    if (!input.trim() || isLoading) return
+
+    const userMessage = input.trim()
+    setInput('')
+    addMessage({ role: 'user', content: userMessage })
+    await requestChatResponse(userMessage)
+  }, [addMessage, input, isLoading, requestChatResponse])
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
       handleSubmit()
     }
   }
 
-  // Handle suggested question click
   const handleSuggestedQuestion = (question: string) => {
     setInput(question)
     textareaRef.current?.focus()
   }
 
-  // Copy message to clipboard
   const copyToClipboard = async (text: string, messageId: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -159,60 +281,17 @@ export function EnhancedChatInterface() {
     }
   }
 
-  // Regenerate response
   const regenerateResponse = async (messageIndex: number) => {
     if (messageIndex < 1) return
-    
+
     const userMessage = messages[messageIndex - 1]
     if (userMessage.role !== 'user') return
-    
-    setLoading(true)
-    try {
-      const requestBody = {
-        message: userMessage.content,
-        audience: selectedAudience,
-        ...(currentSessionId ? { sessionId: currentSessionId } : {}),
-        ...(selectedCategory !== 'all' ? { filters: { category: selectedCategory } } : {}),
-      }
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        addMessage({ 
-          role: 'assistant', 
-          content: data.response,
-          sources: data.sources,
-          backendMessageId: data.messageId
-        })
-        
-        if (showSources && data.sources?.length > 0) {
-          setActiveSources(data.sources)
-          setLastConfidence(data.confidence || 0.5)
-        } else {
-          setActiveSources([])
-          setLastConfidence(0)
-        }
-      }
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to regenerate response',
-        variant: 'destructive'
-      })
-    } finally {
-      setLoading(false)
-    }
+    await requestChatResponse(userMessage.content)
   }
 
   const submitFeedback = useCallback(async (message: Message, rating: number) => {
     const messageId = message.backendMessageId || message.id
-
     setSubmittingFeedbackId(message.id)
 
     try {
@@ -223,7 +302,6 @@ export function EnhancedChatInterface() {
       })
 
       const data = await response.json()
-
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to submit feedback')
       }
@@ -250,44 +328,41 @@ export function EnhancedChatInterface() {
 
   return (
     <div className="flex h-full">
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Welcome section when no messages */}
+      <div className="flex min-w-0 flex-1 flex-col">
         {messages.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
-                <Leaf className="w-8 h-8 text-white" />
+          <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-600 shadow-lg">
+                <Leaf className="h-8 w-8 text-white" />
               </div>
               <div className="text-left">
                 <h1 className="text-2xl font-bold text-gray-900">EPA Punjab</h1>
                 <p className="text-gray-600">Environmental Knowledge Assistant</p>
               </div>
             </div>
-            
-            <div className="max-w-xl mb-8">
-              <p className="text-gray-600 mb-2">
-                Ask questions about environmental issues in Punjab, Pakistan. 
-                Get information on air quality, water resources, biodiversity, 
+
+            <div className="mb-8 max-w-xl">
+              <p className="mb-2 text-gray-600">
+                Ask questions about environmental issues in Punjab, Pakistan.
+                Get information on air quality, water resources, biodiversity,
                 climate change, and environmental regulations.
               </p>
               <Badge variant="secondary" className="text-xs">
                 Phase 6 - Enhanced RAG with Confidence Scoring
               </Badge>
             </div>
-            
-            {/* Suggested Questions Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl w-full">
-              {SUGGESTED_QUESTIONS.map((category, catIndex) => (
-                category.questions.slice(0, 2).map((question, qIndex) => (
+
+            <div className="grid w-full max-w-3xl grid-cols-1 gap-3 md:grid-cols-2">
+              {SUGGESTED_QUESTIONS.map((category, categoryIndex) => (
+                category.questions.slice(0, 2).map((question, questionIndex) => (
                   <Button
-                    key={`${catIndex}-${qIndex}`}
+                    key={`${categoryIndex}-${questionIndex}`}
                     variant="outline"
-                    className="h-auto py-3 px-4 text-left justify-start hover:bg-green-50 hover:border-green-300 transition-colors"
+                    className="h-auto justify-start px-4 py-3 text-left transition-colors hover:border-green-300 hover:bg-green-50"
                     onClick={() => handleSuggestedQuestion(question)}
                   >
-                    <Sparkles className="w-4 h-4 mr-2 text-green-600 shrink-0" />
-                    <span className="text-sm line-clamp-2">{question}</span>
+                    <Sparkles className="mr-2 h-4 w-4 shrink-0 text-green-600" />
+                    <span className="line-clamp-2 text-sm">{question}</span>
                   </Button>
                 ))
               ))}
@@ -295,17 +370,16 @@ export function EnhancedChatInterface() {
           </div>
         )}
 
-        {/* Messages area */}
         {messages.length > 0 && (
           <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-            <div className="max-w-4xl mx-auto space-y-6">
+            <div className="mx-auto max-w-4xl space-y-6">
               {messages.map((message, index) => (
-                <EnhancedMessageBubble 
-                  key={message.id} 
-                message={message}
-                isLast={index === messages.length - 1}
-                onCopy={() => copyToClipboard(message.content, message.id)}
-                onRegenerate={() => regenerateResponse(index)}
+                <EnhancedMessageBubble
+                  key={message.id}
+                  message={message}
+                  isLast={index === messages.length - 1}
+                  onCopy={() => copyToClipboard(message.content, message.id)}
+                  onRegenerate={() => regenerateResponse(index)}
                   onFeedback={(rating) => submitFeedback(message, rating)}
                   feedbackRating={feedbackByMessage[message.id]}
                   feedbackLoading={submittingFeedbackId === message.id}
@@ -315,15 +389,16 @@ export function EnhancedChatInterface() {
                     setShowSourcePanel(true)
                   }}
                   copied={copiedId === message.id}
+                  showStreamingCursor={isStreaming && index === messages.length - 1 && message.role === 'assistant'}
                 />
               ))}
-              {isLoading && (
+              {isLoading && !isStreaming && (
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shrink-0">
-                    <Bot className="w-4 h-4 text-white" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-600">
+                    <Bot className="h-4 w-4 text-white" />
                   </div>
-                  <div className="flex items-center gap-2 text-gray-500 bg-gray-100 rounded-2xl rounded-tl-none px-4 py-3">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  <div className="flex items-center gap-2 rounded-2xl rounded-tl-none bg-gray-100 px-4 py-3 text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-sm">Searching knowledge base...</span>
                   </div>
                 </div>
@@ -332,61 +407,53 @@ export function EnhancedChatInterface() {
           </ScrollArea>
         )}
 
-        {/* Input area */}
         <div className="border-t bg-white p-4">
-          <div className="max-w-4xl mx-auto">
+          <div className="mx-auto max-w-4xl">
             <div className="flex gap-2">
-              <div className="flex-1 relative">
+              <div className="relative flex-1">
                 <Textarea
                   ref={textareaRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(event) => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about environmental issues in Punjab..."
-                  className="min-h-[44px] max-h-32 resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent pr-10"
+                  className="min-h-[44px] max-h-32 resize-none pr-10 focus:border-transparent focus:ring-2 focus:ring-green-500"
                   rows={1}
                   disabled={isLoading}
                 />
                 {messages.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
-                  onClick={() => {
-                    clearMessages()
-                    setActiveSources([])
-                    setShowSourcePanel(false)
-                    setLastConfidence(0)
-                  }}
-                  title="New chat"
-                  aria-label="Start new chat"
-                >
-                  <MessageSquarePlus className="w-4 h-4 text-gray-400" />
-                </Button>
-              )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2"
+                    onClick={() => {
+                      clearMessages()
+                      setActiveSources([])
+                      setShowSourcePanel(false)
+                      setLastConfidence(0)
+                    }}
+                    title="New chat"
+                    aria-label="Start new chat"
+                  >
+                    <MessageSquarePlus className="h-4 w-4 text-gray-400" />
+                  </Button>
+                )}
               </div>
-              <Button 
+              <Button
                 onClick={handleSubmit}
                 disabled={!input.trim() || isLoading}
-                className="bg-green-600 hover:bg-green-700 shrink-0 h-11 min-w-11 px-4"
+                className="h-11 min-w-11 shrink-0 bg-green-600 px-4 hover:bg-green-700"
                 aria-label="Send message"
               >
-                {isLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
               {showSources && activeSources.length > 0 && (
                 <Button
                   variant="outline"
                   onClick={() => setShowSourcePanel(!showSourcePanel)}
-                  className={cn(
-                    'shrink-0',
-                    showSourcePanel && 'bg-green-50 border-green-300'
-                  )}
+                  className={cn('shrink-0', showSourcePanel && 'border-green-300 bg-green-50')}
                 >
-                  <BookOpen className="w-4 h-4 mr-2" />
+                  <BookOpen className="mr-2 h-4 w-4" />
                   Sources
                   <Badge variant="secondary" className="ml-2">
                     {activeSources.length}
@@ -394,21 +461,20 @@ export function EnhancedChatInterface() {
                 </Button>
               )}
             </div>
-            <div className="flex items-center justify-between mt-2">
+            <div className="mt-2 flex items-center justify-between">
               <p className="text-xs text-gray-400">
-                EPA Punjab Environmental Assistant • RAG-powered responses with source attribution
+                EPA Punjab Environmental Assistant - RAG-powered responses with source attribution
               </p>
               <p className="text-xs text-gray-400">
-                Enter to send • Shift+Enter for new line
+                Enter to send - Shift+Enter for new line
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Source Panel - Collapsible */}
       {showSources && showSourcePanel && activeSources.length > 0 && (
-        <div className="w-80 border-l bg-white hidden lg:block">
+        <div className="hidden w-80 border-l bg-white lg:block">
           <SourcePanel
             sources={activeSources}
             confidence={lastConfidence}
@@ -417,7 +483,6 @@ export function EnhancedChatInterface() {
         </div>
       )}
 
-      {/* Mobile Source Sheet */}
       <Sheet open={showSources && showSourcePanel && activeSources.length > 0} onOpenChange={setShowSourcePanel}>
         <SheetContent side="right" className="w-80 p-0 lg:hidden">
           <SheetHeader className="sr-only">
@@ -434,8 +499,6 @@ export function EnhancedChatInterface() {
   )
 }
 
-// ==================== Enhanced Message Bubble ====================
-
 interface MessageBubbleProps {
   message: Message
   isLast: boolean
@@ -447,60 +510,54 @@ interface MessageBubbleProps {
   showSources: boolean
   onViewSources: () => void
   copied: boolean
+  showStreamingCursor: boolean
 }
 
-function EnhancedMessageBubble({ 
-  message, 
-  isLast, 
-  onCopy, 
-  onRegenerate, 
-  onFeedback, 
+function EnhancedMessageBubble({
+  message,
+  isLast,
+  onCopy,
+  onRegenerate,
+  onFeedback,
   feedbackRating,
   feedbackLoading,
   showSources,
   onViewSources,
-  copied 
+  copied,
+  showStreamingCursor
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
-  const hasSources = message.sources && message.sources.length > 0
+  const hasSources = !!message.sources?.length
   const helpfulSelected = feedbackRating !== undefined && feedbackRating >= 4
   const notHelpfulSelected = feedbackRating !== undefined && feedbackRating <= 2
   const feedbackSubmitted = feedbackRating !== undefined
 
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
-      {/* Avatar */}
       <div className={cn(
-        'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
-        isUser 
-          ? 'bg-gray-200' 
-          : 'bg-gradient-to-br from-green-500 to-emerald-600'
+        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+        isUser ? 'bg-gray-200' : 'bg-gradient-to-br from-green-500 to-emerald-600'
       )}>
-        {isUser ? (
-          <User className="w-4 h-4 text-gray-600" />
-        ) : (
-          <Bot className="w-4 h-4 text-white" />
-        )}
+        {isUser ? <User className="h-4 w-4 text-gray-600" /> : <Bot className="h-4 w-4 text-white" />}
       </div>
-      
-      {/* Message Content */}
+
       <div className={cn('flex-1 max-w-[80%]', isUser && 'text-right')}>
         <div className={cn(
           'inline-block rounded-2xl px-4 py-3 text-sm',
-          isUser 
-            ? 'bg-green-600 text-white rounded-tr-none' 
-            : 'bg-gray-100 text-gray-800 rounded-tl-none'
+          isUser ? 'rounded-tr-none bg-green-600 text-white' : 'rounded-tl-none bg-gray-100 text-gray-800'
         )}>
           {isUser ? (
             <p>{message.content}</p>
           ) : (
-            <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:mt-2 prose-headings:mb-1">
+            <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:mb-1 prose-headings:mt-2">
               <SimpleMarkdown>{message.content}</SimpleMarkdown>
+              {showStreamingCursor && (
+                <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-green-600 align-middle" />
+              )}
             </div>
           )}
         </div>
-        
-        {/* Sources indicator */}
+
         {!isUser && showSources && hasSources && (
           <div className="mt-2 text-left">
             <Button
@@ -509,46 +566,39 @@ function EnhancedMessageBubble({
               className="h-7 px-2 text-xs text-gray-500 hover:text-green-600"
               onClick={onViewSources}
             >
-              <BookOpen className="w-3 h-3 mr-1" />
+              <BookOpen className="mr-1 h-3 w-3" />
               {message.sources!.length} source{message.sources!.length !== 1 ? 's' : ''}
-              <Badge variant="outline" className="ml-2 text-xs">
-                View
-              </Badge>
+              <Badge variant="outline" className="ml-2 text-xs">View</Badge>
             </Button>
           </div>
         )}
-        
-        {/* Action Buttons for Assistant Messages */}
+
         {!isUser && (
-          <div className="flex items-center gap-1 mt-2">
-            <Button 
-              variant="ghost" 
-              size="sm" 
+          <div className="mt-2 flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
               className="h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
               onClick={onCopy}
             >
-              {copied ? (
-                <Check className="w-3 h-3 mr-1 text-green-600" />
-              ) : (
-                <Copy className="w-3 h-3 mr-1" />
-              )}
+              {copied ? <Check className="mr-1 h-3 w-3 text-green-600" /> : <Copy className="mr-1 h-3 w-3" />}
               {copied ? 'Copied' : 'Copy'}
             </Button>
-            
+
             {isLast && (
               <>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
                   onClick={onRegenerate}
                 >
-                  <RotateCcw className="w-3 h-3 mr-1" />
+                  <RotateCcw className="mr-1 h-3 w-3" />
                   Regenerate
                 </Button>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className={cn(
                     'h-6 px-2 text-xs',
                     helpfulSelected ? 'bg-green-50 text-green-700 hover:text-green-700' : 'text-gray-500 hover:text-green-600'
@@ -557,11 +607,11 @@ function EnhancedMessageBubble({
                   disabled={feedbackLoading || feedbackSubmitted}
                   aria-label="Mark response as helpful"
                 >
-                  <ThumbsUp className="w-3 h-3" />
+                  <ThumbsUp className="h-3 w-3" />
                 </Button>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className={cn(
                     'h-6 px-2 text-xs',
                     notHelpfulSelected ? 'bg-red-50 text-red-700 hover:text-red-700' : 'text-gray-500 hover:text-red-600'
@@ -570,7 +620,7 @@ function EnhancedMessageBubble({
                   disabled={feedbackLoading || feedbackSubmitted}
                   aria-label="Mark response as not helpful"
                 >
-                  <ThumbsDown className="w-3 h-3" />
+                  <ThumbsDown className="h-3 w-3" />
                 </Button>
               </>
             )}
@@ -581,14 +631,13 @@ function EnhancedMessageBubble({
   )
 }
 
-// Leaf icon component
 function Leaf({ className }: { className?: string }) {
   return (
-    <svg 
-      className={className} 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
       strokeWidth="2"
     >
       <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />

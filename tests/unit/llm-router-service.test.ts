@@ -91,11 +91,21 @@ describe('LLMRouterService', () => {
       query: 'What is the air quality in Lahore?',
       sessionId: 'session-1',
       audienceType: 'General Public',
+      retrievedDocuments: [
+        {
+          id: 'doc-1',
+          title: 'Punjab Air Quality Report',
+          category: 'Air Quality',
+          content: 'PM2.5 levels remained elevated across Lahore in the latest report.',
+          relevanceScore: 0.92,
+        },
+      ],
     })
 
     expect(result.success).toBe(true)
     expect(result.content).toBe('Router answer')
     expect(result.enrichedContext.connectorsUsed).toEqual(['Punjab AQI'])
+    expect(result.enrichedContext.retrievedDocCount).toBe(1)
     expect(dataConnectorService.enrichContext).toHaveBeenCalledWith(
       'air_quality',
       expect.objectContaining({
@@ -105,7 +115,10 @@ describe('LLMRouterService', () => {
     expect(llmProviderRegistry.chatCompletion).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
-          expect.objectContaining({ role: 'system' }),
+          expect.objectContaining({
+            role: 'system',
+            content: expect.stringContaining('## Retrieved Knowledge Base Documents'),
+          }),
           expect.objectContaining({
             role: 'user',
             content: expect.stringContaining('AQI is currently elevated'),
@@ -113,21 +126,27 @@ describe('LLMRouterService', () => {
         ]),
       })
     )
+    expect((llmProviderRegistry.chatCompletion as jest.Mock).mock.calls[0][0].messages[0].content).toContain(
+      'Punjab Air Quality Report (Air Quality)'
+    )
+    expect((llmProviderRegistry.chatCompletion as jest.Mock).mock.calls[0][0].messages[0].content).toContain(
+      'Prioritize information from the Retrieved Knowledge Base Documents over your general knowledge.'
+    )
     expect(db.lLMRequestLog.create).toHaveBeenCalled()
   })
 
   it('returns pipeline health information', async () => {
     ;(llmProviderRegistry.healthCheckAll as jest.Mock).mockResolvedValue({
-      OpenAI: 'healthy',
-      Ollama: 'unhealthy',
+      OpenAI: { healthy: true, latencyMs: 25 },
+      Ollama: { healthy: false, latencyMs: null, error: 'timeout' },
     })
 
     const health = await llmRouter.healthCheck()
 
     expect(health.status).toBe('degraded')
     expect(health.providers).toEqual({
-      OpenAI: 'healthy',
-      Ollama: 'unhealthy',
+      OpenAI: { healthy: true, latencyMs: 25 },
+      Ollama: { healthy: false, latencyMs: null, error: 'timeout' },
     })
     expect(health.connectors).toEqual({
       'Punjab AQI': 'healthy',

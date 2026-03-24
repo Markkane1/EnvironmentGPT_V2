@@ -1,10 +1,7 @@
+// frontend/src/components/admin/providers-settings-panel.tsx
 'use client'
-// =====================================================
-// EPA Punjab EnvironmentGPT - Providers Settings Panel
-// Admin UI for managing LLM providers
-// =====================================================
 
-import React, { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,7 +53,11 @@ interface LLMProvider {
   errorCount: number
   avgLatencyMs: number | null
   hasApiKey: boolean
-  apiKeyEnvVar?: string
+  apiKeyEnvVar?: string | null
+  timeoutSeconds?: number
+  maxTokens?: number
+  temperature?: number
+  notes?: string | null
 }
 
 interface ProviderStats {
@@ -69,10 +70,10 @@ interface ProviderStats {
 }
 
 const ROLE_OPTIONS = [
-  { value: 'primary', label: 'Primary', description: 'Main LLM provider' },
-  { value: 'fallback_1', label: 'Fallback 1', description: 'First backup' },
-  { value: 'fallback_2', label: 'Fallback 2', description: 'Second backup' },
-  { value: 'available', label: 'Available', description: 'Can be used but not in fallback chain' }
+  { value: 'primary', label: 'Primary' },
+  { value: 'fallback_1', label: 'Fallback 1' },
+  { value: 'fallback_2', label: 'Fallback 2' },
+  { value: 'available', label: 'Available' }
 ]
 
 const PROVIDER_TYPES = [
@@ -81,24 +82,34 @@ const PROVIDER_TYPES = [
   { value: 'azure', label: 'Azure OpenAI' }
 ]
 
+const defaultFormData = {
+  name: '',
+  displayName: '',
+  providerType: 'openai_compat',
+  baseUrl: '',
+  apiKeyEnvVar: '',
+  modelId: '',
+  role: 'available',
+  priority: 100,
+  timeoutSeconds: 120,
+  maxTokens: 1024,
+  temperature: 0.1,
+  notes: ''
+}
+
 export function ProvidersSettingsPanel() {
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<ProviderStats | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null)
-
-  // Form state
-  const [formData, setFormData] = useState({
-    name: '',
-    displayName: '',
-    providerType: 'openai_compat',
-    baseUrl: '',
-    apiKeyEnvVar: '',
-    modelId: '',
-    role: 'available',
-    priority: 100
-  })
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, {
+    success: boolean
+    latencyMs: number
+    error: string | null
+  }>>({})
+  const [formData, setFormData] = useState(defaultFormData)
 
   const fetchProviders = async () => {
     setLoading(true)
@@ -132,6 +143,28 @@ export function ProvidersSettingsPanel() {
     fetchStats()
   }, [])
 
+  const handleTestProvider = async (id: string) => {
+    setTestingId(id)
+    try {
+      const response = await fetch(`/api/admin/providers?action=test&id=${id}`)
+      const data = await response.json()
+      if (data.success && data.result) {
+        setTestResults((current) => ({ ...current, [id]: data.result }))
+      }
+    } catch {
+      setTestResults((current) => ({
+        ...current,
+        [id]: {
+          success: false,
+          latencyMs: 0,
+          error: 'Network error'
+        }
+      }))
+    } finally {
+      setTestingId(null)
+    }
+  }
+
   const handleHealthCheck = async () => {
     try {
       await fetch('/api/admin/providers?action=health')
@@ -144,24 +177,19 @@ export function ProvidersSettingsPanel() {
 
   const handleSubmit = async () => {
     try {
-      const url = '/api/admin/providers'
-      const method = editingProvider ? 'PUT' : 'POST'
-      const body = editingProvider
-        ? { id: editingProvider.id, ...formData }
-        : formData
-
-      const response = await fetch(url, {
-        method,
+      const response = await fetch('/api/admin/providers', {
+        method: editingProvider ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(editingProvider ? { id: editingProvider.id, ...formData } : formData)
       })
 
       const data = await response.json()
       if (data.success) {
         setDialogOpen(false)
         setEditingProvider(null)
-        resetForm()
+        setFormData(defaultFormData)
         fetchProviders()
+        fetchStats()
       }
     } catch (error) {
       console.error('Failed to save provider:', error)
@@ -176,6 +204,7 @@ export function ProvidersSettingsPanel() {
       const data = await response.json()
       if (data.success) {
         fetchProviders()
+        fetchStats()
       }
     } catch (error) {
       console.error('Failed to delete provider:', error)
@@ -190,22 +219,14 @@ export function ProvidersSettingsPanel() {
         body: JSON.stringify({ id: provider.id, isActive: !provider.isActive })
       })
       fetchProviders()
+      fetchStats()
     } catch (error) {
       console.error('Failed to toggle provider:', error)
     }
   }
 
   const resetForm = () => {
-    setFormData({
-      name: '',
-      displayName: '',
-      providerType: 'openai_compat',
-      baseUrl: '',
-      apiKeyEnvVar: '',
-      modelId: '',
-      role: 'available',
-      priority: 100
-    })
+    setFormData(defaultFormData)
   }
 
   const openEditDialog = (provider: LLMProvider) => {
@@ -218,7 +239,11 @@ export function ProvidersSettingsPanel() {
       apiKeyEnvVar: provider.apiKeyEnvVar || '',
       modelId: provider.modelId,
       role: provider.role,
-      priority: provider.priority
+      priority: provider.priority,
+      timeoutSeconds: provider.timeoutSeconds || 120,
+      maxTokens: provider.maxTokens || 1024,
+      temperature: provider.temperature || 0.1,
+      notes: provider.notes || ''
     })
     setDialogOpen(true)
   }
@@ -226,9 +251,9 @@ export function ProvidersSettingsPanel() {
   const getHealthBadge = (status: string) => {
     switch (status) {
       case 'healthy':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Healthy</Badge>
+        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="mr-1 h-3 w-3" />Healthy</Badge>
       case 'unhealthy':
-        return <Badge className="bg-red-100 text-red-800"><AlertCircle className="w-3 h-3 mr-1" />Unhealthy</Badge>
+        return <Badge className="bg-red-100 text-red-800"><AlertCircle className="mr-1 h-3 w-3" />Unhealthy</Badge>
       default:
         return <Badge className="bg-gray-100 text-gray-800">Unknown</Badge>
     }
@@ -237,7 +262,7 @@ export function ProvidersSettingsPanel() {
   const getRoleBadge = (role: string) => {
     switch (role) {
       case 'primary':
-        return <Badge className="bg-blue-100 text-blue-800"><Zap className="w-3 h-3 mr-1" />Primary</Badge>
+        return <Badge className="bg-blue-100 text-blue-800"><Zap className="mr-1 h-3 w-3" />Primary</Badge>
       case 'fallback_1':
         return <Badge className="bg-yellow-100 text-yellow-800">Fallback 1</Badge>
       case 'fallback_2':
@@ -249,8 +274,7 @@ export function ProvidersSettingsPanel() {
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -300,22 +324,30 @@ export function ProvidersSettingsPanel() {
         </Card>
       </div>
 
-      {/* Actions */}
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">LLM Providers</h3>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { fetchProviders(); fetchStats(); }}>
-            <RefreshCw className="w-4 h-4 mr-2" />
+          <Button variant="outline" onClick={() => { fetchProviders(); fetchStats() }}>
+            <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
           </Button>
           <Button variant="outline" onClick={handleHealthCheck}>
-            <Activity className="w-4 h-4 mr-2" />
+            <Activity className="mr-2 h-4 w-4" />
             Health Check
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingProvider(null); resetForm(); } }}>
+          <Dialog
+            open={dialogOpen}
+            onOpenChange={(open) => {
+              setDialogOpen(open)
+              if (!open) {
+                setEditingProvider(null)
+                resetForm()
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
-                <Plus className="w-4 h-4 mr-2" />
+                <Plus className="mr-2 h-4 w-4" />
                 Add Provider
               </Button>
             </DialogTrigger>
@@ -334,7 +366,7 @@ export function ProvidersSettingsPanel() {
                       id="name"
                       placeholder="openai"
                       value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      onChange={(event) => setFormData({ ...formData, name: event.target.value })}
                       disabled={!!editingProvider}
                     />
                   </div>
@@ -344,19 +376,19 @@ export function ProvidersSettingsPanel() {
                       id="displayName"
                       placeholder="OpenAI GPT-4"
                       value={formData.displayName}
-                      onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                      onChange={(event) => setFormData({ ...formData, displayName: event.target.value })}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="providerType">Provider Type</Label>
-                  <Select value={formData.providerType} onValueChange={(v) => setFormData({ ...formData, providerType: v })}>
+                  <Select value={formData.providerType} onValueChange={(value) => setFormData({ ...formData, providerType: value })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PROVIDER_TYPES.map(type => (
+                      {PROVIDER_TYPES.map((type) => (
                         <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -367,12 +399,12 @@ export function ProvidersSettingsPanel() {
                   <Label htmlFor="baseUrl">Base URL</Label>
                   <Input
                     id="baseUrl"
-                    placeholder="https://api.openai.com/v1"
+                    placeholder="https://api.openai.com"
                     value={formData.baseUrl}
-                    onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                    onChange={(event) => setFormData({ ...formData, baseUrl: event.target.value })}
                   />
                   <p className="text-xs text-muted-foreground">
-                    The base URL for the API. For Ollama, use http://localhost:11434/v1
+                    For Ollama, use http://localhost:11434/v1. Dockerized vLLM uses http://vllm:8000.
                   </p>
                 </div>
 
@@ -381,18 +413,18 @@ export function ProvidersSettingsPanel() {
                     <Label htmlFor="modelId">Model ID</Label>
                     <Input
                       id="modelId"
-                      placeholder="gpt-4o"
+                      placeholder="qwen3-30b-a3b"
                       value={formData.modelId}
-                      onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
+                      onChange={(event) => setFormData({ ...formData, modelId: event.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="apiKeyEnvVar">API Key Env Variable</Label>
                     <Input
                       id="apiKeyEnvVar"
-                      placeholder="OPENAI_API_KEY"
+                      placeholder="VLLM_API_KEY"
                       value={formData.apiKeyEnvVar}
-                      onChange={(e) => setFormData({ ...formData, apiKeyEnvVar: e.target.value })}
+                      onChange={(event) => setFormData({ ...formData, apiKeyEnvVar: event.target.value })}
                     />
                     <p className="text-xs text-muted-foreground">Optional for local providers</p>
                   </div>
@@ -401,15 +433,13 @@ export function ProvidersSettingsPanel() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="role">Role</Label>
-                    <Select value={formData.role} onValueChange={(v) => setFormData({ ...formData, role: v })}>
+                    <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ROLE_OPTIONS.map(role => (
-                          <SelectItem key={role.value} value={role.value}>
-                            {role.label}
-                          </SelectItem>
+                        {ROLE_OPTIONS.map((role) => (
+                          <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -420,32 +450,85 @@ export function ProvidersSettingsPanel() {
                       id="priority"
                       type="number"
                       value={formData.priority}
-                      onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 100 })}
+                      onChange={(event) => setFormData({ ...formData, priority: parseInt(event.target.value, 10) || 100 })}
                     />
-                    <p className="text-xs text-muted-foreground">Lower = higher priority</p>
+                    <p className="text-xs text-muted-foreground">Lower numbers are preferred first.</p>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4 mt-2">
+                  <p className="mb-3 text-sm font-medium">Advanced Settings</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="timeoutSeconds">Timeout (seconds)</Label>
+                      <Input
+                        id="timeoutSeconds"
+                        type="number"
+                        min={1}
+                        max={3600}
+                        value={formData.timeoutSeconds}
+                        onChange={(event) => setFormData({
+                          ...formData,
+                          timeoutSeconds: parseInt(event.target.value, 10) || 120
+                        })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="maxTokens">Max Tokens</Label>
+                      <Input
+                        id="maxTokens"
+                        type="number"
+                        min={1}
+                        max={32768}
+                        value={formData.maxTokens}
+                        onChange={(event) => setFormData({
+                          ...formData,
+                          maxTokens: parseInt(event.target.value, 10) || 1024
+                        })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="temperature">Temperature</Label>
+                      <Input
+                        id="temperature"
+                        type="number"
+                        min={0}
+                        max={2}
+                        step={0.1}
+                        value={formData.temperature}
+                        onChange={(event) => setFormData({
+                          ...formData,
+                          temperature: parseFloat(event.target.value) || 0.1
+                        })}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Input
+                      id="notes"
+                      placeholder="Optional admin notes about this provider"
+                      value={formData.notes}
+                      onChange={(event) => setFormData({ ...formData, notes: event.target.value })}
+                    />
                   </div>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleSubmit}>
-                  {editingProvider ? 'Update' : 'Add'} Provider
-                </Button>
+                <Button onClick={handleSubmit}>{editingProvider ? 'Update' : 'Add'} Provider</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
       </div>
 
-      {/* Providers Table */}
       <Card>
         <CardContent className="pt-6">
           {loading ? (
-            <div className="text-center py-8 text-muted-foreground">Loading providers...</div>
+            <div className="py-8 text-center text-muted-foreground">Loading providers...</div>
           ) : providers.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No providers configured. Add one to get started.
-            </div>
+            <div className="py-8 text-center text-muted-foreground">No providers configured. Add one to get started.</div>
           ) : (
             <Table>
               <TableHeader>
@@ -464,15 +547,26 @@ export function ProvidersSettingsPanel() {
                 {providers.map((provider) => (
                   <TableRow key={provider.id}>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div>
-                          <p className="font-medium">{provider.displayName}</p>
-                          <p className="text-xs text-muted-foreground">{provider.name}</p>
-                        </div>
+                      <div>
+                        <p className="font-medium">{provider.displayName}</p>
+                        <p className="text-xs text-muted-foreground">{provider.name}</p>
+                        {testResults[provider.id] && (
+                          <p className="mt-1 text-xs">
+                            {testResults[provider.id].success ? (
+                              <span className="text-green-600">
+                                Test passed - {testResults[provider.id].latencyMs}ms
+                              </span>
+                            ) : (
+                              <span className="text-red-600">
+                                {testResults[provider.id].error || 'Test failed'}
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">{provider.modelId}</code>
+                      <code className="rounded bg-muted px-2 py-1 text-xs">{provider.modelId}</code>
                     </TableCell>
                     <TableCell>{getRoleBadge(provider.role)}</TableCell>
                     <TableCell>{getHealthBadge(provider.healthStatus)}</TableCell>
@@ -484,9 +578,7 @@ export function ProvidersSettingsPanel() {
                       )}
                     </TableCell>
                     <TableCell>{provider.requestCount}</TableCell>
-                    <TableCell>
-                      {provider.avgLatencyMs ? `${Math.round(provider.avgLatencyMs)}ms` : '-'}
-                    </TableCell>
+                    <TableCell>{provider.avgLatencyMs ? `${Math.round(provider.avgLatencyMs)}ms` : '-'}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Switch
@@ -494,6 +586,20 @@ export function ProvidersSettingsPanel() {
                           onCheckedChange={() => handleToggleActive(provider)}
                           aria-label={`Toggle ${provider.displayName}`}
                         />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleTestProvider(provider.id)}
+                          disabled={testingId === provider.id}
+                          title="Send test message to this provider"
+                          aria-label={`Test ${provider.displayName}`}
+                        >
+                          {testingId === provider.id ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Zap className="h-4 w-4 text-amber-500" />
+                          )}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -520,7 +626,6 @@ export function ProvidersSettingsPanel() {
         </CardContent>
       </Card>
 
-      {/* Fallback Chain Info */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Automatic Fallback Chain</CardTitle>
@@ -531,11 +636,11 @@ export function ProvidersSettingsPanel() {
         <CardContent>
           <div className="flex items-center gap-2 text-sm">
             <Badge className="bg-blue-100 text-blue-800">Primary</Badge>
-            <span>→</span>
+            <span>{'->'}</span>
             <Badge className="bg-yellow-100 text-yellow-800">Fallback 1</Badge>
-            <span>→</span>
+            <span>{'->'}</span>
             <Badge className="bg-orange-100 text-orange-800">Fallback 2</Badge>
-            <span>→</span>
+            <span>{'->'}</span>
             <Badge className="bg-gray-100 text-gray-800">Available</Badge>
           </div>
         </CardContent>

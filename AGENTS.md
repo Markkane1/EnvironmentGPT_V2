@@ -7,7 +7,7 @@
 - Frontend: Next.js App Router with React in `frontend/`
 - Backend: Next.js Route Handlers in `backend/src/app/api`
 - Database: PostgreSQL with Prisma
-- Auth: none detected in active runtime code
+- Auth: JWT-based admin auth with frontend route protection and backend auth endpoints
 - Package manager: npm
 - Test stack: Jest, Testing Library, Playwright
 
@@ -75,10 +75,10 @@ EnvironmentGPT is an EPA Punjab knowledge assistant. It ingests PDF, Word, Markd
 - Run the full test suite at the end of every session
 - Update `docs/PROJECT_STRUCTURE.md` if the folder structure changes
 
-## Follow-up Actions Needed
-- Decide whether `frontend/src/components/admin/dashboard.tsx` should remain alongside `frontend/src/components/admin/enhanced-dashboard.tsx`
-- Decide whether `frontend/src/components/chat/chat-interface.tsx` should remain alongside `frontend/src/components/chat/enhanced-chat-interface.tsx`
-- Decide whether the `advanced-*` and non-advanced RAG/embedding services are both intentional public surfaces
-- Decide whether `backend/prisma/dev.db` and `backend/prisma/push-created.db` are fixtures that should stay or local artifacts that should be removed
-- Decide whether the admin surface is intentionally unauthenticated or whether an auth layer should be added
-- Put the project back inside a real Git repository before any future broad refactor
+## Current Decisions
+- `frontend/src/components/admin/enhanced-dashboard.tsx` is the only admin dashboard implementation. The legacy `dashboard.tsx` has been retired.
+- `frontend/src/components/chat/enhanced-chat-interface.tsx` is the canonical chat surface. Any remaining callers should target the enhanced implementation only.
+- Only the `advanced-*` RAG/embedding services are public service surfaces. `embedding-service.ts` and `rag-service.ts` are internal compatibility layers until their remaining internal callers are migrated.
+- `backend/prisma/*.db` files are local SQLite artifacts for ad hoc development and must remain ignored and untracked in this PostgreSQL project.
+- The admin surface is intentionally authenticated. Any `PLAYWRIGHT_TEST` bypass is test-only and must not be treated as product behavior.
+- The project is already inside a Git repository, and future broad refactors must continue to happen under Git.

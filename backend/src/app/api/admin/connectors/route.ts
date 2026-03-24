@@ -12,7 +12,7 @@ import { withRateLimit } from '@/lib/security/rate-limiter'
 import { createValidationErrorResponse } from '@/lib/validators'
 import { z } from 'zod'
 
-const CONNECTOR_ENV_VAR_PREFIXES = ['CONNECTOR_']
+const CONNECTOR_ENV_VAR_PREFIXES: string[] = []
 const MAX_URL_LENGTH = 2048
 const MAX_NAME_LENGTH = 255
 const MAX_HEADER_LENGTH = 255

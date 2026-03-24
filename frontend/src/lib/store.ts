@@ -7,35 +7,26 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { Message, Document, ChatSession, DocumentFilter } from '@/types'
 
-// ==================== Chat Store ====================
-
 interface ChatState {
-  // State
   messages: Message[]
   isLoading: boolean
   currentSessionId: string | null
   recentSessions: ChatSession[]
-  
-  // Filters
   selectedDocuments: string[]
   selectedAudience: string
   selectedCategory: string
   sidebarOpen: boolean
-  
-  // Actions
-  addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void
+  addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => string
+  updateMessageContent: (messageId: string, content: string) => void
+  updateMessage: (messageId: string, updates: Partial<Pick<Message, 'content' | 'sources' | 'backendMessageId'>>) => void
   setLoading: (loading: boolean) => void
   setCurrentSession: (sessionId: string | null) => void
   loadSession: (session: ChatSession) => void
   clearMessages: () => void
-  
-  // Filter Actions
   setSelectedDocuments: (docs: string[]) => void
   setSelectedAudience: (audience: string) => void
   setSelectedCategory: (category: string) => void
   toggleSidebar: () => void
-  
-  // Session Actions
   setRecentSessions: (sessions: ChatSession[]) => void
   removeSession: (sessionId: string) => void
 }
@@ -43,30 +34,42 @@ interface ChatState {
 export const useChatStore = create<ChatState>()(
   persist(
     (set) => ({
-      // Initial State
       messages: [],
       isLoading: false,
       currentSessionId: null,
       recentSessions: [],
-      
       selectedDocuments: [],
       selectedAudience: 'General Public',
       selectedCategory: 'all',
       sidebarOpen: true,
-      
-      // Message Actions
-      addMessage: (message) => set((state) => ({
-        messages: [...state.messages, {
-          ...message,
-          id: crypto.randomUUID(),
-          timestamp: new Date()
-        }]
+
+      addMessage: (message) => {
+        const id = crypto.randomUUID()
+        set((state) => ({
+          messages: [...state.messages, {
+            ...message,
+            id,
+            timestamp: new Date()
+          }]
+        }))
+        return id
+      },
+
+      updateMessageContent: (messageId, content) => set((state) => ({
+        messages: state.messages.map((message) => (
+          message.id === messageId ? { ...message, content } : message
+        ))
       })),
-      
+
+      updateMessage: (messageId, updates) => set((state) => ({
+        messages: state.messages.map((message) => (
+          message.id === messageId ? { ...message, ...updates } : message
+        ))
+      })),
+
       setLoading: (loading) => set({ isLoading: loading }),
-      
       setCurrentSession: (sessionId) => set({ currentSessionId: sessionId }),
-      
+
       loadSession: (session) => set({
         currentSessionId: session.id,
         messages: session.messages.map((message) => ({
@@ -78,26 +81,19 @@ export const useChatStore = create<ChatState>()(
           backendMessageId: message.role === 'assistant' ? message.id : undefined,
         }))
       }),
-      
-      clearMessages: () => set({ 
-        messages: [], 
-        currentSessionId: null 
+
+      clearMessages: () => set({
+        messages: [],
+        currentSessionId: null
       }),
-      
-      // Filter Actions
+
       setSelectedDocuments: (docs) => set({ selectedDocuments: docs }),
-      
       setSelectedAudience: (audience) => set({ selectedAudience: audience }),
-      
       setSelectedCategory: (category) => set({ selectedCategory: category }),
-      
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-      
-      // Session Actions
       setRecentSessions: (sessions) => set({ recentSessions: sessions }),
-      
       removeSession: (sessionId) => set((state) => ({
-        recentSessions: state.recentSessions.filter(s => s.id !== sessionId)
+        recentSessions: state.recentSessions.filter((session) => session.id !== sessionId)
       })),
     }),
     {
@@ -113,21 +109,14 @@ export const useChatStore = create<ChatState>()(
   )
 )
 
-// ==================== Document Store ====================
-
 interface DocumentState {
-  // State
   documents: Document[]
   selectedDocument: Document | null
   isLoading: boolean
   totalCount: number
   currentPage: number
   pageSize: number
-  
-  // Filters
   filters: DocumentFilter
-  
-  // Actions
   setDocuments: (documents: Document[]) => void
   setSelectedDocument: (document: Document | null) => void
   setLoading: (loading: boolean) => void
@@ -149,7 +138,6 @@ const defaultFilters: DocumentFilter = {
 export const useDocumentStore = create<DocumentState>()(
   persist(
     (set) => ({
-      // Initial State
       documents: [],
       selectedDocument: null,
       isLoading: false,
@@ -157,49 +145,28 @@ export const useDocumentStore = create<DocumentState>()(
       currentPage: 1,
       pageSize: 10,
       filters: defaultFilters,
-      
-      // Actions
       setDocuments: (documents) => set({ documents }),
-      
       setSelectedDocument: (document) => set({ selectedDocument: document }),
-      
       setLoading: (loading) => set({ isLoading: loading }),
-      
-      setPagination: (total, page, pageSize) => set({
-        totalCount: total,
-        currentPage: page,
-        pageSize: pageSize
-      }),
-      
-      setFilters: (filters) => set((state) => ({
-        filters: { ...state.filters, ...filters }
-      })),
-      
+      setPagination: (total, page, pageSize) => set({ totalCount: total, currentPage: page, pageSize }),
+      setFilters: (filters) => set((state) => ({ filters: { ...state.filters, ...filters } })),
       resetFilters: () => set({ filters: defaultFilters }),
     }),
     {
       name: 'epa-document-storage',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        filters: state.filters,
-        pageSize: state.pageSize,
-      }),
+      partialize: (state) => ({ filters: state.filters, pageSize: state.pageSize }),
     }
   )
 )
 
-// ==================== UI Store ====================
-
 interface UIState {
-  // State
   isDarkMode: boolean
   showFeedbackModal: boolean
   feedbackMessageId: string | null
   showDocumentModal: boolean
   showSettingsModal: boolean
   toasts: Toast[]
-  
-  // Actions
   toggleDarkMode: () => void
   setShowFeedbackModal: (show: boolean, messageId?: string) => void
   setShowDocumentModal: (show: boolean) => void
@@ -218,40 +185,30 @@ interface Toast {
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
-      // Initial State
       isDarkMode: false,
       showFeedbackModal: false,
       feedbackMessageId: null,
       showDocumentModal: false,
       showSettingsModal: false,
       toasts: [],
-      
-      // Actions
       toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
-      
       setShowFeedbackModal: (show, messageId) => set({
         showFeedbackModal: show,
         feedbackMessageId: messageId || null
       }),
-      
       setShowDocumentModal: (show) => set({ showDocumentModal: show }),
-      
       setShowSettingsModal: (show) => set({ showSettingsModal: show }),
-      
       addToast: (toast) => set((state) => ({
         toasts: [...state.toasts, { ...toast, id: crypto.randomUUID() }]
       })),
-      
       removeToast: (id) => set((state) => ({
-        toasts: state.toasts.filter(t => t.id !== id)
+        toasts: state.toasts.filter((toast) => toast.id !== id)
       })),
     }),
     {
       name: 'epa-ui-storage',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        isDarkMode: state.isDarkMode,
-      }),
+      partialize: (state) => ({ isDarkMode: state.isDarkMode }),
     }
   )
 )

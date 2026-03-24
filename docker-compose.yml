@@ -46,6 +46,7 @@ services:
       - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-this-in-production}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000}
       - ENABLE_CACHE=${ENABLE_CACHE:-true}
       - CACHE_TTL=${CACHE_TTL:-3600}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -56,7 +57,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
+      vllm:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
@@ -117,6 +118,45 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  # ==================== vLLM LLM Service ====================
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: environmentgpt-vllm
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_NAME=${VLLM_MODEL:-qwen3-30b-a3b}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
+      - GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTIL:-0.90}
+      - TENSOR_PARALLEL_SIZE=${VLLM_TENSOR_PARALLEL:-1}
+    volumes:
+      - vllm-models:/root/.cache/huggingface
+    networks:
+      - environmentgpt-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      --model ${VLLM_MODEL:-qwen3-30b-a3b}
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTIL:-0.90}
+      --tensor-parallel-size ${VLLM_TENSOR_PARALLEL:-1}
+      --trust-remote-code
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
 
   # ==================== Nginx Reverse Proxy ====================
   nginx:
@@ -197,6 +237,8 @@ volumes:
   app-logs:
     driver: local
   ollama-data:
+    driver: local
+  vllm-models:
     driver: local
   redis-data:
     driver: local

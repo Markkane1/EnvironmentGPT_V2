@@ -598,6 +598,10 @@ export function EnhancedAdminDashboard({ initialTab = 'overview' }: { initialTab
 
           {/* Analytics Tab */}
           <TabsContent value="analytics" className="mt-6">
+            <div className="mb-4">
+              <p className="text-sm font-medium text-gray-700">Analytics Visualization</p>
+              <p className="text-sm text-gray-500">Operational charts and document coverage summaries for the knowledge base.</p>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>

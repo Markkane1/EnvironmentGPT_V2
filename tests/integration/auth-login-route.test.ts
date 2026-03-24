@@ -1,3 +1,5 @@
+process.env.JWT_SECRET = 'integration-secret'
+
 import bcrypt from 'bcryptjs'
 import { POST } from '@/app/api/auth/login/route'
 import {
@@ -7,6 +9,8 @@ import {
 } from '@/middleware/auth'
 import { db } from '@/lib/db'
 import jwt from 'jsonwebtoken'
+
+jest.setTimeout(15000)
 
 jest.mock('@/lib/db', () => ({
   db: {
@@ -40,16 +44,11 @@ function jsonRequest(url: string, body: unknown): Request {
 
 describe('/api/auth/login', () => {
   beforeEach(() => {
-    process.env.JWT_SECRET = 'integration-secret'
     jest.clearAllMocks()
   })
 
-  afterEach(() => {
-    delete process.env.JWT_SECRET
-  })
-
   it('returns a signed JWT for valid credentials', async () => {
-    const passwordHash = await bcrypt.hash('correct-horse-battery-staple', 10)
+    const passwordHash = await bcrypt.hash('correct-horse-battery-staple', 4)
 
     mockDb.user.findUnique.mockResolvedValue({
       id: 'user-1',
@@ -99,7 +98,7 @@ describe('/api/auth/login', () => {
       id: 'user-1',
       role: 'viewer',
       isActive: true,
-      passwordHash: await bcrypt.hash('valid-password', 10),
+      passwordHash: await bcrypt.hash('valid-password', 4),
     } as never)
 
     const response = await POST(jsonRequest('http://localhost/api/auth/login', {

@@ -20,12 +20,15 @@ const MAX_NOTES_LENGTH = 500
 
 const providerInputSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
-  providerType: z.enum(['openai_compat', 'ollama']).optional(),
+  displayName: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
+  providerType: z.enum(['openai_compat', 'ollama', 'azure']).optional(),
   baseUrl: z.string().trim().min(1).max(MAX_URL_LENGTH),
   modelId: z.string().trim().min(1).max(MAX_MODEL_ID_LENGTH),
   apiKeyEnvVar: z.string().trim().min(1).max(MAX_ENV_VAR_LENGTH).nullable().optional(),
   role: z.enum(['primary', 'fallback_1', 'fallback_2', 'available', 'disabled']).optional(),
   isActive: z.boolean().optional(),
+  priority: z.number().int().min(1).max(1000).optional(),
+  defaultParams: z.record(z.string(), z.unknown()).optional(),
   timeoutSeconds: z.number().int().min(1).max(3600).optional(),
   maxTokens: z.number().int().min(1).max(32768).optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -39,32 +42,39 @@ const providerUpdateSchema = providerInputSchema.partial().extend({
 function normalizeProviderPayload(input: unknown): Record<string, unknown> {
   const value = (input && typeof input === 'object') ? input as Record<string, unknown> : {}
 
-  return {
+  return Object.fromEntries(
+    Object.entries({
     id: value.id,
     name: value.name,
+    displayName: value.displayName ?? value.display_name,
     providerType: value.providerType ?? value.provider_type,
     baseUrl: value.baseUrl ?? value.base_url,
     modelId: value.modelId ?? value.model_id,
-    apiKeyEnvVar: value.apiKeyEnvVar ?? value.api_key_env_var ?? null,
+    apiKeyEnvVar: value.apiKeyEnvVar ?? value.api_key_env_var,
     role: value.role,
     isActive: value.isActive ?? value.is_active,
+    priority: value.priority,
+    defaultParams: value.defaultParams ?? value.default_params,
     timeoutSeconds: value.timeoutSeconds ?? value.timeout_seconds,
     maxTokens: value.maxTokens ?? value.max_tokens,
     temperature: value.temperature,
-    notes: value.notes ?? null,
-  }
+    notes: value.notes,
+    }).filter(([, nestedValue]) => nestedValue !== undefined)
+  )
 }
 
 function serializeProvider(provider: LLMProviderConfig) {
   return {
     id: provider.id,
     name: provider.name,
+    displayName: provider.displayName,
     providerType: provider.providerType,
     baseUrl: provider.baseUrl,
     modelId: provider.modelId,
     apiKeyEnvVar: provider.apiKeyEnvVar ?? null,
     role: provider.role,
     isActive: provider.isActive,
+    priority: provider.priority,
     timeoutSeconds: provider.timeoutSeconds,
     maxTokens: provider.maxTokens,
     temperature: provider.temperature,
@@ -73,6 +83,9 @@ function serializeProvider(provider: LLMProviderConfig) {
     createdAt: provider.createdAt,
     healthStatus: provider.healthStatus,
     lastHealthCheck: provider.lastHealthCheck ?? null,
+    requestCount: provider.requestCount,
+    errorCount: provider.errorCount,
+    avgLatencyMs: provider.avgLatencyMs ?? null,
   }
 }
 
@@ -105,6 +118,18 @@ export async function handleGet(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const action = searchParams.get('action')
 
+    if (action === 'test') {
+      const id = searchParams.get('id')
+      if (!id) {
+        return NextResponse.json(
+          { success: false, error: 'Provider ID is required for testing' },
+          { status: 400 }
+        )
+      }
+      const result = await llmProviderRegistry.testProvider(id)
+      return NextResponse.json({ success: true, result })
+    }
+
     if (action === 'stats') {
       const stats = await llmProviderRegistry.getStats()
       return NextResponse.json({ success: true, stats })
@@ -123,10 +148,10 @@ export async function handleGet(request: NextRequest) {
       })
     }
 
-    const providers = await llmProviderRegistry.availableProviders()
+    const providers = await llmProviderRegistry.getAllProviders()
     return NextResponse.json({
       success: true,
-      providers,
+      providers: providers.map(serializeProvider),
     })
   } catch (error) {
     console.error('[API] Failed to get providers:', error)
@@ -162,12 +187,15 @@ export async function handlePost(request: NextRequest) {
 
     const provider = await llmProviderRegistry.addProvider({
       name: parsed.data.name,
+      displayName: parsed.data.displayName,
       providerType: parsed.data.providerType || 'openai_compat',
       baseUrl: parsed.data.baseUrl,
       modelId: parsed.data.modelId,
       apiKeyEnvVar: parsed.data.apiKeyEnvVar || null,
       role: parsed.data.role || 'available',
       isActive: parsed.data.isActive ?? true,
+      priority: parsed.data.priority,
+      defaultParams: parsed.data.defaultParams,
       timeoutSeconds: parsed.data.timeoutSeconds,
       maxTokens: parsed.data.maxTokens,
       temperature: parsed.data.temperature,
@@ -214,12 +242,15 @@ export async function handlePut(request: NextRequest) {
 
     const provider = await llmProviderRegistry.updateProvider(id, {
       name: updates.name,
+      displayName: updates.displayName,
       providerType: updates.providerType,
       baseUrl: updates.baseUrl,
       modelId: updates.modelId,
       apiKeyEnvVar: updates.apiKeyEnvVar,
       role: updates.role,
       isActive: updates.isActive,
+      priority: updates.priority,
+      defaultParams: updates.defaultParams,
       timeoutSeconds: updates.timeoutSeconds,
       maxTokens: updates.maxTokens,
       temperature: updates.temperature,

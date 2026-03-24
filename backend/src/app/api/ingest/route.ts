@@ -39,11 +39,34 @@ const ingestMetadataSchema = z.object({
 }).strict()
 
 const reindexDocumentSchema = z.object({
-  documentId: z.string().trim().min(1).max(255),
+  documentId: z.string().trim().min(1),
 }).strict()
+
+
+
+const REINDEX_BATCH_SIZE = 5
 
 function canAccessDocument(ownerId: string | null | undefined, userId: string, role: string) {
   return role === 'admin' || ownerId === userId
+}
+
+async function processInBatches<T, R>(
+  items: T[],
+  batchSize: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = []
+
+  for (let index = 0; index < items.length; index += batchSize) {
+    const batch = items.slice(index, index + batchSize)
+    const batchResults = await Promise.all(
+      batch.map((item, batchIndex) => worker(item, index + batchIndex))
+    )
+
+    results.push(...batchResults)
+  }
+
+  return results
 }
 
 // ==================== Helper Functions ====================
@@ -392,24 +415,25 @@ async function handlePut(request: NextRequest) {
     // Create new chunks
     const chunks = splitIntoChunks(document.content)
     
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
+    const chunkRecords = await processInBatches(chunks, REINDEX_BATCH_SIZE, async (chunk, index) => {
       const embedding = await embeddingService.generateEmbedding(chunk.text)
-      
-      await db.documentChunk.create({
-        data: {
-          documentId,
-          content: chunk.text,
-          chunkIndex: i,
-          embedding: JSON.stringify(embedding),
-          metadata: JSON.stringify({
-            startIndex: chunk.startIndex,
-            endIndex: chunk.endIndex,
-            wordCount: chunk.wordCount,
-          })
-        }
-      })
-    }
+
+      return {
+        documentId,
+        content: chunk.text,
+        chunkIndex: index,
+        embedding: JSON.stringify(embedding),
+        metadata: JSON.stringify({
+          startIndex: chunk.startIndex,
+          endIndex: chunk.endIndex,
+          wordCount: chunk.wordCount,
+        })
+      }
+    })
+
+    await db.documentChunk.createMany({
+      data: chunkRecords
+    })
     
     return NextResponse.json({
       success: true,
@@ -483,3 +507,7 @@ async function handleDelete(request: NextRequest) {
 export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'upload')
 export const PUT = withRateLimit((request) => handlePut(request as NextRequest), 'upload')
 export const DELETE = withRateLimit((request) => handleDelete(request as NextRequest), 'upload')
+
+
+
+

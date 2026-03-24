@@ -13,6 +13,16 @@ import {
 
 export function withAuth() {
   return async function proxy(request: NextRequest) {
+    const isLocalTestHost = ['127.0.0.1', 'localhost'].includes(request.nextUrl.hostname)
+
+    if (
+      process.env.PLAYWRIGHT_TEST === '1'
+      && process.env.NODE_ENV !== 'production'
+      && isLocalTestHost
+    ) {
+      return NextResponse.next()
+    }
+
     const token = request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)?.value
     const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)?.value
     const session = await getAdminSession(token)

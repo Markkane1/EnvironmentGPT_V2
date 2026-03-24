@@ -3,6 +3,9 @@ import { db } from '@/lib/db'
 import type { UserRole } from '@/types'
 import {
   ACCESS_TOKEN_EXPIRES_IN,
+  generateRefreshToken,
+  getRefreshTokenCookieOptions,
+  getRefreshTokenExpiresAt,
   getExpiredRefreshTokenCookieOptions,
   hashRefreshToken,
   REFRESH_TOKEN_COOKIE_NAME,
@@ -68,8 +71,21 @@ async function handlePost(request: NextRequest) {
       userId: tokenRecord.user.id,
       role: tokenRecord.user.role as UserRole,
     })
+    const rotatedRefreshToken = generateRefreshToken()
+    const refreshTokenExpiresAt = getRefreshTokenExpiresAt()
 
-    return NextResponse.json({
+    await db.refreshToken.update({
+      where: {
+        hashedToken: hashRefreshToken(refreshToken),
+      },
+      data: {
+        hashedToken: hashRefreshToken(rotatedRefreshToken),
+        expiresAt: refreshTokenExpiresAt,
+        revoked: false,
+      },
+    })
+
+    const response = NextResponse.json({
       success: true,
       token,
       expiresIn: ACCESS_TOKEN_EXPIRES_IN,
@@ -81,6 +97,14 @@ async function handlePost(request: NextRequest) {
         role: tokenRecord.user.role,
       },
     })
+
+    response.cookies.set(
+      REFRESH_TOKEN_COOKIE_NAME,
+      rotatedRefreshToken,
+      getRefreshTokenCookieOptions(refreshTokenExpiresAt)
+    )
+
+    return response
   } catch (error) {
     console.error('Refresh token error:', error)
     return NextResponse.json(
@@ -91,3 +115,4 @@ async function handlePost(request: NextRequest) {
 }
 
 export const POST = withRateLimit((request) => handlePost(request as NextRequest), 'auth')
+
