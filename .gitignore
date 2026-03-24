@@ -17,6 +17,7 @@ htmlcov/
 .idea/
 *.swp
 .claude/
+docs/
 
 tests/playwright-results.json
 jest-results.json
